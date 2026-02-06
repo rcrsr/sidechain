@@ -1,0 +1,65 @@
+{
+  "name": "@rcrsr/sidechain",
+  "version": "0.1.0",
+  "description": "Structured persistent content layer for LLM applications",
+  "type": "module",
+  "main": "dist/core/index.js",
+  "bin": {
+    "sidechain": "./dist/cli/index.js",
+    "sidechain-mcp": "./dist/mcp/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rcrsr/sidechain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rcrsr/sidechain/issues"
+  },
+  "homepage": "https://github.com/rcrsr/sidechain#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write src/ tests/",
+    "format:check": "prettier --check src/ tests/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "clean": "rm -rf dist coverage",
+    "prepublishOnly": "npm run check && npm run build"
+  },
+  "keywords": [
+    "sidechain",
+    "llm",
+    "content",
+    "schema",
+    "mcp"
+  ],
+  "author": "Andre Bremer",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.2.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.39.2",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "prettier": "^3.8.1",
+    "tsc-files": "^1.1.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
