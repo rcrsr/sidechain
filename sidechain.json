@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "mounts": {
+    "initiatives": {
+      "path": "conduct/initiatives",
+      "groupSchema": "initiative-group"
+    },
+    "features": {
+      "path": "conduct/features",
+      "groupSchema": "feature-group"
+    },
+    "projects": {
+      "path": "conduct/projects",
+      "groupSchema": "project-group"
+    }
+  },
+  "groupSchemas": {
+    "initiative-group": {
+      "schema-id": "initiative-group",
+      "description": "Initiative with requirements, specification, and plan",
+      "slots": [
+        {
+          "id": "requirements",
+          "schema": "requirement-node",
+          "description": "Requirements document"
+        },
+        {
+          "id": "specification",
+          "schema": "specification-node",
+          "description": "Technical specification"
+        },
+        {
+          "id": "plan",
+          "schema": "plan-node",
+          "description": "Implementation plan"
+        }
+      ]
+    },
+    "feature-group": {
+      "schema-id": "feature-group",
+      "description": "Feature with specification and implementation tracking",
+      "slots": [
+        {
+          "id": "spec",
+          "schema": "feature-spec-node",
+          "description": "Feature specification"
+        },
+        {
+          "id": "progress",
+          "schema": "progress-node",
+          "description": "Implementation progress"
+        }
+      ]
+    },
+    "project-group": {
+      "schema-id": "project-group",
+      "description": "Project with planning and execution phases",
+      "slots": [
+        {
+          "id": "overview",
+          "schema": "project-overview-node",
+          "description": "Project overview"
+        },
+        {
+          "id": "plan",
+          "schema": "plan-node",
+          "description": "Project plan"
+        }
+      ]
+    }
+  },
+  "nodeSchemas": {
+    "requirement-node": {
+      "schema-id": "requirement-node",
+      "version": "1.0",
+      "description": "Requirements document with metadata and sections",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["draft", "locked", "closed"],
+            "required": true,
+            "description": "'draft' = in progress, 'locked' = requirements finalized, 'closed' = completed"
+          },
+          "created": {
+            "type": "date",
+            "required": true,
+            "description": "Creation date in YYYY-MM-DD format"
+          },
+          "owner": {
+            "type": "string",
+            "required": false,
+            "description": "Person or team responsible"
+          },
+          "priority": {
+            "type": "enum",
+            "values": ["low", "medium", "high", "critical"],
+            "required": false,
+            "description": "Priority level"
+          },
+          "tags": {
+            "type": "string[]",
+            "required": false,
+            "description": "Categorization tags"
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "overview",
+            "type": "text",
+            "description": "High-level requirements overview"
+          },
+          {
+            "id": "acceptance-criteria",
+            "type": "checklist",
+            "description": "Testable acceptance criteria"
+          }
+        ],
+        "optional": [
+          {
+            "id": "notes",
+            "type": "text",
+            "description": "Additional notes and context"
+          },
+          {
+            "id": "references",
+            "type": "reference-list",
+            "description": "Related documents and resources"
+          }
+        ]
+      }
+    },
+    "specification-node": {
+      "schema-id": "specification-node",
+      "version": "1.0",
+      "description": "Technical specification with architecture and design",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["draft", "review", "approved", "archived"],
+            "required": true,
+            "description": "'draft' = in progress, 'review' = pending approval, 'approved' = finalized, 'archived' = superseded"
+          },
+          "created": {
+            "type": "date",
+            "required": true
+          },
+          "modified": {
+            "type": "date",
+            "required": false
+          },
+          "author": {
+            "type": "string",
+            "required": false
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "overview",
+            "type": "text",
+            "description": "Specification overview"
+          },
+          {
+            "id": "architecture",
+            "type": "text",
+            "description": "System architecture and design"
+          }
+        ],
+        "optional": [
+          {
+            "id": "api-design",
+            "type": "text",
+            "description": "API contracts and interfaces"
+          },
+          {
+            "id": "data-model",
+            "type": "text",
+            "description": "Data structures and schemas"
+          },
+          {
+            "id": "testing-strategy",
+            "type": "text",
+            "description": "Testing approach"
+          }
+        ]
+      }
+    },
+    "plan-node": {
+      "schema-id": "plan-node",
+      "version": "1.0",
+      "description": "Implementation plan with phases and tasks",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["draft", "active", "completed"],
+            "required": true,
+            "description": "'draft' = planning, 'active' = in progress, 'completed' = finished"
+          },
+          "created": {
+            "type": "date",
+            "required": true
+          },
+          "target-date": {
+            "type": "date",
+            "required": false,
+            "description": "Target completion date"
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "summary",
+            "type": "text",
+            "description": "Plan summary and objectives"
+          }
+        ],
+        "dynamic": [
+          {
+            "id-pattern": "phase-{n}",
+            "type": "task-list",
+            "min": 1,
+            "description": "Implementation phases with tasks"
+          }
+        ],
+        "optional": [
+          {
+            "id": "notes",
+            "type": "text",
+            "description": "Planning notes"
+          }
+        ]
+      }
+    },
+    "feature-spec-node": {
+      "schema-id": "feature-spec-node",
+      "version": "1.0",
+      "description": "Feature specification node",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["draft", "locked"],
+            "required": true
+          },
+          "created": {
+            "type": "date",
+            "required": true
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "overview",
+            "type": "text"
+          },
+          {
+            "id": "requirements",
+            "type": "checklist"
+          }
+        ]
+      }
+    },
+    "progress-node": {
+      "schema-id": "progress-node",
+      "version": "1.0",
+      "description": "Implementation progress tracking",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["not-started", "in-progress", "completed"],
+            "required": true
+          },
+          "completion-percent": {
+            "type": "number",
+            "required": false,
+            "description": "Completion percentage (0-100)"
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "tasks",
+            "type": "task-list",
+            "description": "Implementation tasks"
+          }
+        ]
+      }
+    },
+    "project-overview-node": {
+      "schema-id": "project-overview-node",
+      "version": "1.0",
+      "description": "Project overview and goals",
+      "metadata": {
+        "fields": {
+          "status": {
+            "type": "enum",
+            "values": ["planning", "active", "on-hold", "completed"],
+            "required": true
+          },
+          "created": {
+            "type": "date",
+            "required": true
+          },
+          "stakeholders": {
+            "type": "string[]",
+            "required": false
+          }
+        }
+      },
+      "sections": {
+        "required": [
+          {
+            "id": "overview",
+            "type": "text"
+          },
+          {
+            "id": "goals",
+            "type": "checklist"
+          }
+        ]
+      }
+    }
+  },
+  "nodeExtension": ".md"
+}

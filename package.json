@@ -46,7 +46,9 @@
   ],
   "author": "Andre Bremer",
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "yaml": "^2.8.2"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.0",

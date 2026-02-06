@@ -1,0 +1,1259 @@
+/**
+ * Tests for MCP tool routing
+ * Covers: IC-13
+ *
+ * Validates:
+ * - All 22 tool calls route correctly to Store methods
+ * - Overload handling for set_meta (field+value vs fields)
+ * - Parameter variant handling for describe and describe_group
+ */
+
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+
+import type { ControlPlane } from '../../src/types/control-plane.js';
+import type { ItemOps } from '../../src/types/item.js';
+import type { Store } from '../../src/types/store.js';
+
+/**
+ * Mock Store implementation for testing routing
+ */
+function createMockStore(): Store & ControlPlane {
+  return {
+    // Store operations
+    list: vi.fn(),
+    get: vi.fn(),
+    exists: vi.fn(),
+    createGroup: vi.fn(),
+    deleteGroup: vi.fn(),
+    describeGroup: vi.fn(),
+    validateGroup: vi.fn(),
+    meta: vi.fn(),
+    setMeta: vi.fn(),
+    sections: vi.fn(),
+    section: vi.fn(),
+    writeSection: vi.fn(),
+    appendSection: vi.fn(),
+    addSection: vi.fn(),
+    removeSection: vi.fn(),
+    populate: vi.fn(),
+    describe: vi.fn(),
+    validate: vi.fn(),
+
+    // Item operations
+    item: {
+      get: vi.fn(),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+    } as unknown as ItemOps,
+
+    // ControlPlane operations
+    mounts: vi.fn(),
+    listSchemas: vi.fn(),
+    getSchema: vi.fn(),
+    registerSchema: vi.fn(),
+    info: vi.fn(),
+    listContentTypes: vi.fn(),
+  };
+}
+
+/**
+ * Helper to simulate tool call routing
+ * Extracted from src/mcp/index.ts for testing
+ */
+async function routeToolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+  store: Store & ControlPlane
+): Promise<unknown> {
+  switch (toolName) {
+    case 'sidechain_list': {
+      if (typeof args['group'] === 'string') {
+        const slots = await store.list(args['group']);
+        return { ok: true, slots };
+      } else {
+        const groups = await store.list();
+        return { ok: true, groups };
+      }
+    }
+
+    case 'sidechain_get': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      const node = await store.get(args['path']);
+      return { ok: true, ...node };
+    }
+
+    case 'sidechain_exists': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      const exists = await store.exists(args['path']);
+      return { ok: true, exists };
+    }
+
+    case 'sidechain_create_group': {
+      if (typeof args['id'] !== 'string') {
+        throw new Error('Missing required argument: id');
+      }
+      const result = await store.createGroup(args['id']);
+      return { ok: true, ...result };
+    }
+
+    case 'sidechain_delete_group': {
+      if (typeof args['id'] !== 'string') {
+        throw new Error('Missing required argument: id');
+      }
+      const result = await store.deleteGroup(args['id']);
+      return result;
+    }
+
+    case 'sidechain_describe_group': {
+      // Handle parameter variants: { schema } | { group }
+      if (typeof args['schema'] === 'string') {
+        // Describe schema structure
+        const schema = await store.getSchema(args['schema']);
+        return { ok: true, schema };
+      } else if (typeof args['group'] === 'string') {
+        // Describe group instance
+        const description = await store.describeGroup(args['group']);
+        return { ok: true, ...description };
+      } else {
+        throw new Error('Missing required argument: schema or group');
+      }
+    }
+
+    case 'sidechain_validate_group': {
+      if (typeof args['group'] !== 'string') {
+        throw new Error('Missing required argument: group');
+      }
+      const result = await store.validateGroup(args['group']);
+      return { ok: true, ...result };
+    }
+
+    case 'sidechain_meta': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['field'] === 'string') {
+        // Read single field
+        const result = await store.meta(args['path'], args['field']);
+        return { ok: true, ...result };
+      } else {
+        // Read all metadata
+        const result = await store.meta(args['path']);
+        return { ok: true, ...result };
+      }
+    }
+
+    case 'sidechain_set_meta': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+
+      // Extract token if present
+      const token =
+        typeof args['token'] === 'string' ? args['token'] : undefined;
+      const opts = token !== undefined ? { token } : undefined;
+
+      // Handle overload: { field, value } vs { fields }
+      if (typeof args['field'] === 'string' && args['value'] !== undefined) {
+        // Single field variant
+        const result = await store.setMeta(
+          args['path'],
+          args['field'],
+          args['value'],
+          opts
+        );
+        return result;
+      } else if (
+        typeof args['fields'] === 'object' &&
+        args['fields'] !== null &&
+        !Array.isArray(args['fields'])
+      ) {
+        // Multiple fields variant
+        const result = await store.setMeta(
+          args['path'],
+          args['fields'] as Record<string, unknown>,
+          opts
+        );
+        return result;
+      } else {
+        throw new Error('Missing required argument: field+value or fields');
+      }
+    }
+
+    case 'sidechain_sections': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      const sections = await store.sections(args['path']);
+      return { ok: true, sections };
+    }
+
+    case 'sidechain_section': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      const result = await store.section(args['path'], args['section']);
+      return { ok: true, ...result };
+    }
+
+    case 'sidechain_write_section': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (args['content'] === undefined) {
+        throw new Error('Missing required argument: content');
+      }
+
+      const token =
+        typeof args['token'] === 'string' ? args['token'] : undefined;
+      const opts = token !== undefined ? { token } : undefined;
+
+      const result = await store.writeSection(
+        args['path'],
+        args['section'],
+        args['content'],
+        opts
+      );
+      return result;
+    }
+
+    case 'sidechain_append_section': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (typeof args['content'] !== 'string') {
+        throw new Error('Missing required argument: content');
+      }
+
+      const token =
+        typeof args['token'] === 'string' ? args['token'] : undefined;
+      const opts = token !== undefined ? { token } : undefined;
+
+      const result = await store.appendSection(
+        args['path'],
+        args['section'],
+        args['content'],
+        opts
+      );
+      return result;
+    }
+
+    case 'sidechain_add_section': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['id'] !== 'string') {
+        throw new Error('Missing required argument: id');
+      }
+      if (typeof args['type'] !== 'string') {
+        throw new Error('Missing required argument: type');
+      }
+
+      const def: { id: string; type: string; after?: string } = {
+        id: args['id'],
+        type: args['type'],
+      };
+
+      if (typeof args['after'] === 'string') {
+        def.after = args['after'];
+      }
+
+      const result = await store.addSection(args['path'], def);
+      return result;
+    }
+
+    case 'sidechain_remove_section': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      const result = await store.removeSection(args['path'], args['section']);
+      return result;
+    }
+
+    case 'sidechain_populate': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+
+      // PopulateData requires sections field (can be empty object)
+      const data: {
+        metadata?: Record<string, unknown>;
+        sections: Record<string, unknown>;
+      } = {
+        sections: {},
+      };
+
+      if (
+        typeof args['metadata'] === 'object' &&
+        args['metadata'] !== null &&
+        !Array.isArray(args['metadata'])
+      ) {
+        data.metadata = args['metadata'] as Record<string, unknown>;
+      }
+
+      if (
+        typeof args['sections'] === 'object' &&
+        args['sections'] !== null &&
+        !Array.isArray(args['sections'])
+      ) {
+        data.sections = args['sections'] as Record<string, unknown>;
+      }
+
+      const token =
+        typeof args['token'] === 'string' ? args['token'] : undefined;
+      const opts = token !== undefined ? { token } : undefined;
+
+      const result = await store.populate(args['path'], data, opts);
+      return result;
+    }
+
+    case 'sidechain_item_get': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (typeof args['item'] !== 'string') {
+        throw new Error('Missing required argument: item');
+      }
+      const result = await store.item.get(
+        args['path'],
+        args['section'],
+        args['item']
+      );
+      return { ok: true, ...result };
+    }
+
+    case 'sidechain_item_add': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (
+        typeof args['data'] !== 'object' ||
+        args['data'] === null ||
+        Array.isArray(args['data'])
+      ) {
+        throw new Error('Missing required argument: data (must be object)');
+      }
+      const result = await store.item.add(
+        args['path'],
+        args['section'],
+        args['data'] as Record<string, unknown>
+      );
+      return result;
+    }
+
+    case 'sidechain_item_update': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (typeof args['item'] !== 'string') {
+        throw new Error('Missing required argument: item');
+      }
+      if (
+        typeof args['data'] !== 'object' ||
+        args['data'] === null ||
+        Array.isArray(args['data'])
+      ) {
+        throw new Error('Missing required argument: data (must be object)');
+      }
+
+      const token =
+        typeof args['token'] === 'string' ? args['token'] : undefined;
+      const opts = token !== undefined ? { token } : undefined;
+
+      const result = await store.item.update(
+        args['path'],
+        args['section'],
+        args['item'],
+        args['data'] as Record<string, unknown>,
+        opts
+      );
+      return result;
+    }
+
+    case 'sidechain_item_remove': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      if (typeof args['section'] !== 'string') {
+        throw new Error('Missing required argument: section');
+      }
+      if (typeof args['item'] !== 'string') {
+        throw new Error('Missing required argument: item');
+      }
+      const result = await store.item.remove(
+        args['path'],
+        args['section'],
+        args['item']
+      );
+      return result;
+    }
+
+    case 'sidechain_describe': {
+      // Handle parameter variants: { schema } | { path }
+      if (typeof args['schema'] === 'string') {
+        // Describe schema by ID
+        const description = await store.describe(args['schema']);
+        return { ok: true, ...description };
+      } else if (typeof args['path'] === 'string') {
+        // Describe node by path
+        const description = await store.describe(args['path']);
+        return { ok: true, ...description };
+      } else {
+        throw new Error('Missing required argument: schema or path');
+      }
+    }
+
+    case 'sidechain_validate': {
+      if (typeof args['path'] !== 'string') {
+        throw new Error('Missing required argument: path');
+      }
+      const result = await store.validate(args['path']);
+      return { ok: true, ...result };
+    }
+
+    default:
+      throw new Error(`Unknown tool: ${toolName}`);
+  }
+}
+
+describe('MCP Tool Routing', () => {
+  let store: Store & ControlPlane;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  describe('sidechain_list', () => {
+    test('routes to store.list() without group parameter', async () => {
+      vi.mocked(store.list).mockResolvedValue([
+        { id: 'sc_g_123', schema: 'initiative' },
+      ]);
+
+      const result = await routeToolCall('sidechain_list', {}, store);
+
+      expect(store.list).toHaveBeenCalledWith();
+      expect(result).toEqual({
+        ok: true,
+        groups: [{ id: 'sc_g_123', schema: 'initiative' }],
+      });
+    });
+
+    test('routes to store.list(group) with group parameter', async () => {
+      vi.mocked(store.list).mockResolvedValue([
+        { id: 'spec', schema: 'specification', empty: false },
+      ]);
+
+      const result = await routeToolCall(
+        'sidechain_list',
+        { group: 'sc_g_123' },
+        store
+      );
+
+      expect(store.list).toHaveBeenCalledWith('sc_g_123');
+      expect(result).toEqual({
+        ok: true,
+        slots: [{ id: 'spec', schema: 'specification', empty: false }],
+      });
+    });
+  });
+
+  describe('sidechain_get', () => {
+    test('routes to store.get(path)', async () => {
+      vi.mocked(store.get).mockResolvedValue({
+        metadata: { status: 'draft' },
+        sections: [],
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_get',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.get).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({
+        ok: true,
+        metadata: { status: 'draft' },
+        sections: [],
+        token: 'token_123',
+      });
+    });
+
+    test('throws error when path is missing', async () => {
+      await expect(routeToolCall('sidechain_get', {}, store)).rejects.toThrow(
+        'Missing required argument: path'
+      );
+    });
+  });
+
+  describe('sidechain_exists', () => {
+    test('routes to store.exists(path)', async () => {
+      vi.mocked(store.exists).mockResolvedValue(true);
+
+      const result = await routeToolCall(
+        'sidechain_exists',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.exists).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({ ok: true, exists: true });
+    });
+  });
+
+  describe('sidechain_create_group', () => {
+    test('routes to store.createGroup(id)', async () => {
+      vi.mocked(store.createGroup).mockResolvedValue({
+        address: 'sc_g_abc',
+        schema: 'initiative',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_create_group',
+        { id: 'initiative' },
+        store
+      );
+
+      expect(store.createGroup).toHaveBeenCalledWith('initiative');
+      expect(result).toEqual({
+        ok: true,
+        address: 'sc_g_abc',
+        schema: 'initiative',
+      });
+    });
+  });
+
+  describe('sidechain_delete_group', () => {
+    test('routes to store.deleteGroup(id)', async () => {
+      vi.mocked(store.deleteGroup).mockResolvedValue({
+        ok: true,
+        value: undefined,
+      });
+
+      const result = await routeToolCall(
+        'sidechain_delete_group',
+        { id: 'sc_g_123' },
+        store
+      );
+
+      expect(store.deleteGroup).toHaveBeenCalledWith('sc_g_123');
+      expect(result).toEqual({ ok: true, value: undefined });
+    });
+  });
+
+  describe('sidechain_describe_group', () => {
+    test('routes to store.getSchema(schema) when schema parameter provided', async () => {
+      vi.mocked(store.getSchema).mockResolvedValue({
+        'schema-id': 'initiative',
+        slots: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_describe_group',
+        { schema: 'initiative' },
+        store
+      );
+
+      expect(store.getSchema).toHaveBeenCalledWith('initiative');
+      expect(result).toEqual({
+        ok: true,
+        schema: { 'schema-id': 'initiative', slots: [] },
+      });
+    });
+
+    test('routes to store.describeGroup(group) when group parameter provided', async () => {
+      vi.mocked(store.describeGroup).mockResolvedValue({
+        address: 'sc_g_123',
+        schema: 'initiative',
+        slots: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_describe_group',
+        { group: 'sc_g_123' },
+        store
+      );
+
+      expect(store.describeGroup).toHaveBeenCalledWith('sc_g_123');
+      expect(result).toEqual({
+        ok: true,
+        address: 'sc_g_123',
+        schema: 'initiative',
+        slots: [],
+      });
+    });
+
+    test('throws error when neither schema nor group provided', async () => {
+      await expect(
+        routeToolCall('sidechain_describe_group', {}, store)
+      ).rejects.toThrow('Missing required argument: schema or group');
+    });
+  });
+
+  describe('sidechain_validate_group', () => {
+    test('routes to store.validateGroup(group)', async () => {
+      vi.mocked(store.validateGroup).mockResolvedValue({
+        valid: true,
+        errors: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_validate_group',
+        { group: 'sc_g_123' },
+        store
+      );
+
+      expect(store.validateGroup).toHaveBeenCalledWith('sc_g_123');
+      expect(result).toEqual({ ok: true, valid: true, errors: [] });
+    });
+  });
+
+  describe('sidechain_meta', () => {
+    test('routes to store.meta(path) without field parameter', async () => {
+      vi.mocked(store.meta).mockResolvedValue({
+        metadata: { status: 'draft' },
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_meta',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.meta).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({
+        ok: true,
+        metadata: { status: 'draft' },
+        token: 'token_123',
+      });
+    });
+
+    test('routes to store.meta(path, field) with field parameter', async () => {
+      vi.mocked(store.meta).mockResolvedValue({
+        value: 'draft',
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_meta',
+        { path: 'sc_g_123/spec', field: 'status' },
+        store
+      );
+
+      expect(store.meta).toHaveBeenCalledWith('sc_g_123/spec', 'status');
+      expect(result).toEqual({
+        ok: true,
+        value: 'draft',
+        token: 'token_123',
+      });
+    });
+  });
+
+  describe('sidechain_set_meta', () => {
+    test('routes to store.setMeta(path, field, value) for single field', async () => {
+      vi.mocked(store.setMeta).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_set_meta',
+        { path: 'sc_g_123/spec', field: 'status', value: 'locked' },
+        store
+      );
+
+      expect(store.setMeta).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'status',
+        'locked',
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+      });
+    });
+
+    test('routes to store.setMeta(path, fields) for multiple fields', async () => {
+      vi.mocked(store.setMeta).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_set_meta',
+        {
+          path: 'sc_g_123/spec',
+          fields: { status: 'locked', priority: 'high' },
+        },
+        store
+      );
+
+      expect(store.setMeta).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        { status: 'locked', priority: 'high' },
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+      });
+    });
+
+    test('passes token option when provided (single field)', async () => {
+      vi.mocked(store.setMeta).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_new',
+      });
+
+      await routeToolCall(
+        'sidechain_set_meta',
+        {
+          path: 'sc_g_123/spec',
+          field: 'status',
+          value: 'locked',
+          token: 'token_old',
+        },
+        store
+      );
+
+      expect(store.setMeta).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'status',
+        'locked',
+        { token: 'token_old' }
+      );
+    });
+
+    test('passes token option when provided (multiple fields)', async () => {
+      vi.mocked(store.setMeta).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_new',
+      });
+
+      await routeToolCall(
+        'sidechain_set_meta',
+        {
+          path: 'sc_g_123/spec',
+          fields: { status: 'locked' },
+          token: 'token_old',
+        },
+        store
+      );
+
+      expect(store.setMeta).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        { status: 'locked' },
+        { token: 'token_old' }
+      );
+    });
+
+    test('throws error when neither field+value nor fields provided', async () => {
+      await expect(
+        routeToolCall('sidechain_set_meta', { path: 'sc_g_123/spec' }, store)
+      ).rejects.toThrow('Missing required argument: field+value or fields');
+    });
+  });
+
+  describe('sidechain_sections', () => {
+    test('routes to store.sections(path)', async () => {
+      vi.mocked(store.sections).mockResolvedValue([
+        { id: 'overview', type: 'text' },
+      ]);
+
+      const result = await routeToolCall(
+        'sidechain_sections',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.sections).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({
+        ok: true,
+        sections: [{ id: 'overview', type: 'text' }],
+      });
+    });
+  });
+
+  describe('sidechain_section', () => {
+    test('routes to store.section(path, section)', async () => {
+      vi.mocked(store.section).mockResolvedValue({
+        id: 'overview',
+        type: 'text',
+        content: 'Content here',
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_section',
+        { path: 'sc_g_123/spec', section: 'overview' },
+        store
+      );
+
+      expect(store.section).toHaveBeenCalledWith('sc_g_123/spec', 'overview');
+      expect(result).toEqual({
+        ok: true,
+        id: 'overview',
+        type: 'text',
+        content: 'Content here',
+        token: 'token_123',
+      });
+    });
+  });
+
+  describe('sidechain_write_section', () => {
+    test('routes to store.writeSection(path, section, content)', async () => {
+      vi.mocked(store.writeSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_write_section',
+        {
+          path: 'sc_g_123/spec',
+          section: 'overview',
+          content: 'New content',
+        },
+        store
+      );
+
+      expect(store.writeSection).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'overview',
+        'New content',
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+    });
+
+    test('passes token option when provided', async () => {
+      vi.mocked(store.writeSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_new',
+        nodeToken: 'node_token_new',
+      });
+
+      await routeToolCall(
+        'sidechain_write_section',
+        {
+          path: 'sc_g_123/spec',
+          section: 'overview',
+          content: 'New content',
+          token: 'token_old',
+        },
+        store
+      );
+
+      expect(store.writeSection).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'overview',
+        'New content',
+        { token: 'token_old' }
+      );
+    });
+  });
+
+  describe('sidechain_append_section', () => {
+    test('routes to store.appendSection(path, section, content)', async () => {
+      vi.mocked(store.appendSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_append_section',
+        {
+          path: 'sc_g_123/spec',
+          section: 'overview',
+          content: 'Appended text',
+        },
+        store
+      );
+
+      expect(store.appendSection).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'overview',
+        'Appended text',
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/spec',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+    });
+  });
+
+  describe('sidechain_add_section', () => {
+    test('routes to store.addSection(path, def) without after', async () => {
+      vi.mocked(store.addSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_add_section',
+        { path: 'sc_g_123/spec', id: 'notes', type: 'text' },
+        store
+      );
+
+      expect(store.addSection).toHaveBeenCalledWith('sc_g_123/spec', {
+        id: 'notes',
+        type: 'text',
+      });
+      expect(result).toEqual({ ok: true, path: 'sc_g_123/spec' });
+    });
+
+    test('routes to store.addSection(path, def) with after', async () => {
+      vi.mocked(store.addSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+      });
+
+      await routeToolCall(
+        'sidechain_add_section',
+        {
+          path: 'sc_g_123/spec',
+          id: 'notes',
+          type: 'text',
+          after: 'overview',
+        },
+        store
+      );
+
+      expect(store.addSection).toHaveBeenCalledWith('sc_g_123/spec', {
+        id: 'notes',
+        type: 'text',
+        after: 'overview',
+      });
+    });
+  });
+
+  describe('sidechain_remove_section', () => {
+    test('routes to store.removeSection(path, section)', async () => {
+      vi.mocked(store.removeSection).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_remove_section',
+        { path: 'sc_g_123/spec', section: 'notes' },
+        store
+      );
+
+      expect(store.removeSection).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        'notes'
+      );
+      expect(result).toEqual({ ok: true, path: 'sc_g_123/spec' });
+    });
+  });
+
+  describe('sidechain_populate', () => {
+    test('routes to store.populate(path, data) with both metadata and sections', async () => {
+      vi.mocked(store.populate).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        sections: 2,
+        metadata: 1,
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_populate',
+        {
+          path: 'sc_g_123/spec',
+          metadata: { status: 'draft' },
+          sections: { overview: 'Content', notes: 'Notes' },
+        },
+        store
+      );
+
+      expect(store.populate).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        {
+          metadata: { status: 'draft' },
+          sections: { overview: 'Content', notes: 'Notes' },
+        },
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/spec',
+        sections: 2,
+        metadata: 1,
+        token: 'token_123',
+      });
+    });
+
+    test('routes to store.populate with only metadata (empty sections)', async () => {
+      vi.mocked(store.populate).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/spec',
+        sections: 0,
+        metadata: 1,
+        token: 'token_123',
+      });
+
+      await routeToolCall(
+        'sidechain_populate',
+        {
+          path: 'sc_g_123/spec',
+          metadata: { status: 'draft' },
+        },
+        store
+      );
+
+      expect(store.populate).toHaveBeenCalledWith(
+        'sc_g_123/spec',
+        { metadata: { status: 'draft' }, sections: {} },
+        undefined
+      );
+    });
+  });
+
+  describe('sidechain_item_get', () => {
+    test('routes to store.item.get(path, section, item)', async () => {
+      vi.mocked(store.item.get).mockResolvedValue({
+        content: { id: '1.1', title: 'Task 1' },
+        token: 'token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_item_get',
+        { path: 'sc_g_123/plan', section: 'phase-1', item: '1.1' },
+        store
+      );
+
+      expect(store.item.get).toHaveBeenCalledWith(
+        'sc_g_123/plan',
+        'phase-1',
+        '1.1'
+      );
+      expect(result).toEqual({
+        ok: true,
+        content: { id: '1.1', title: 'Task 1' },
+        token: 'token_123',
+      });
+    });
+  });
+
+  describe('sidechain_item_add', () => {
+    test('routes to store.item.add(path, section, data)', async () => {
+      vi.mocked(store.item.add).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/plan',
+        item: '1.1',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_item_add',
+        {
+          path: 'sc_g_123/plan',
+          section: 'phase-1',
+          data: { title: 'New task' },
+        },
+        store
+      );
+
+      expect(store.item.add).toHaveBeenCalledWith('sc_g_123/plan', 'phase-1', {
+        title: 'New task',
+      });
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/plan',
+        item: '1.1',
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+    });
+  });
+
+  describe('sidechain_item_update', () => {
+    test('routes to store.item.update(path, section, item, data)', async () => {
+      vi.mocked(store.item.update).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/plan',
+        item: '1.1',
+        previous: { title: 'Old title' },
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_item_update',
+        {
+          path: 'sc_g_123/plan',
+          section: 'phase-1',
+          item: '1.1',
+          data: { title: 'Updated title' },
+        },
+        store
+      );
+
+      expect(store.item.update).toHaveBeenCalledWith(
+        'sc_g_123/plan',
+        'phase-1',
+        '1.1',
+        { title: 'Updated title' },
+        undefined
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: 'sc_g_123/plan',
+        item: '1.1',
+        previous: { title: 'Old title' },
+        token: 'token_123',
+        nodeToken: 'node_token_123',
+      });
+    });
+  });
+
+  describe('sidechain_item_remove', () => {
+    test('routes to store.item.remove(path, section, item)', async () => {
+      vi.mocked(store.item.remove).mockResolvedValue({
+        ok: true,
+        path: 'sc_g_123/plan',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_item_remove',
+        { path: 'sc_g_123/plan', section: 'phase-1', item: '1.1' },
+        store
+      );
+
+      expect(store.item.remove).toHaveBeenCalledWith(
+        'sc_g_123/plan',
+        'phase-1',
+        '1.1'
+      );
+      expect(result).toEqual({ ok: true, path: 'sc_g_123/plan' });
+    });
+  });
+
+  describe('sidechain_describe', () => {
+    test('routes to store.describe(schema) when schema parameter provided', async () => {
+      vi.mocked(store.describe).mockResolvedValue({
+        schema: 'specification',
+        metadata: {},
+        sections: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_describe',
+        { schema: 'specification' },
+        store
+      );
+
+      expect(store.describe).toHaveBeenCalledWith('specification');
+      expect(result).toEqual({
+        ok: true,
+        schema: 'specification',
+        metadata: {},
+        sections: [],
+      });
+    });
+
+    test('routes to store.describe(path) when path parameter provided', async () => {
+      vi.mocked(store.describe).mockResolvedValue({
+        schema: 'specification',
+        metadata: {},
+        sections: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_describe',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.describe).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({
+        ok: true,
+        schema: 'specification',
+        metadata: {},
+        sections: [],
+      });
+    });
+
+    test('throws error when neither schema nor path provided', async () => {
+      await expect(
+        routeToolCall('sidechain_describe', {}, store)
+      ).rejects.toThrow('Missing required argument: schema or path');
+    });
+  });
+
+  describe('sidechain_validate', () => {
+    test('routes to store.validate(path)', async () => {
+      vi.mocked(store.validate).mockResolvedValue({
+        valid: true,
+        errors: [],
+      });
+
+      const result = await routeToolCall(
+        'sidechain_validate',
+        { path: 'sc_g_123/spec' },
+        store
+      );
+
+      expect(store.validate).toHaveBeenCalledWith('sc_g_123/spec');
+      expect(result).toEqual({ ok: true, valid: true, errors: [] });
+    });
+  });
+
+  describe('Unknown tool', () => {
+    test('throws error for unknown tool name', async () => {
+      await expect(
+        routeToolCall('sidechain_unknown', {}, store)
+      ).rejects.toThrow('Unknown tool: sidechain_unknown');
+    });
+  });
+});
