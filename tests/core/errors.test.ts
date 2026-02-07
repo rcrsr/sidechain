@@ -1,6 +1,6 @@
 /**
  * Tests for error classes
- * Covers: EC-1, EC-2, EC-3, EC-4, EC-5, EC-6, EC-7, EC-8, EC-9, EC-10, EC-11, EC-12, EC-13
+ * Covers: EC-1, EC-2, EC-3, EC-4, EC-5, EC-6, EC-7, EC-8, EC-9, EC-10, EC-11, EC-12, EC-13, IC-4
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,6 +31,37 @@ describe('SidechainError', () => {
   it('extends Error with stack trace', () => {
     const error = new SidechainError('TEST_CODE', 'Test message');
 
+    expect(error).toBeInstanceOf(Error);
+    expect(error.stack).toBeDefined();
+  });
+
+  // IC-4, EC-3: SESSION_CLOSED code is valid error code
+  it('constructs SESSION_CLOSED error directly', () => {
+    const error = new SidechainError('SESSION_CLOSED', 'Session is closed');
+
+    expect(error.code).toBe('SESSION_CLOSED');
+    expect(error.message).toBe('Session is closed');
+    expect(error.name).toBe('SidechainError');
+  });
+
+  it('SESSION_CLOSED error has correct response shape', () => {
+    const error = new SidechainError('SESSION_CLOSED', 'Session is closed');
+
+    const response = {
+      code: error.code,
+      message: error.message,
+    };
+
+    expect(response).toEqual({
+      code: 'SESSION_CLOSED',
+      message: 'Session is closed',
+    });
+  });
+
+  it('SESSION_CLOSED error extends Error', () => {
+    const error = new SidechainError('SESSION_CLOSED', 'Session is closed');
+
+    expect(error).toBeInstanceOf(SidechainError);
     expect(error).toBeInstanceOf(Error);
     expect(error.stack).toBeDefined();
   });

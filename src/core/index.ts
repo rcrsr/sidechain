@@ -5,6 +5,10 @@ export { Sidechain } from './store.js';
 export type { MappingEntry, MappingFile } from './client.js';
 export { Client } from './client.js';
 
+// Session layer
+export type { Session } from '../types/session.js';
+export { Session as SessionImpl } from './session.js';
+
 // Store interface and key types
 export type {
   GroupDescription,

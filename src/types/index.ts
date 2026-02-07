@@ -62,6 +62,9 @@ export type { Backend, RawNode } from './backend.js';
 // Client types
 export type { Client, MappingRecord } from './client.js';
 
+// Session types
+export type { Session } from './session.js';
+
 // Control plane types
 export type {
   ContentTypeEntry,

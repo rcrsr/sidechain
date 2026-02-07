@@ -1,5 +1,7 @@
 # Sidechain
 
+> **Experimental** — API and storage format may change between releases.
+
 Structured persistent content layer for LLM applications.
 
 Sidechain gives LLMs typed read/write access to persistent, schema-validated content through a storage-agnostic API. Developers define schemas. Sidechain enforces them. LLMs interact with structured content using logical addresses — no filesystem paths, no custom storage code.
@@ -70,11 +72,61 @@ Configuration loads from `sidechain.json` in the working directory or `--config 
 
 ## MCP Server
 
-Same operations as CLI, exposed as MCP tools. Each command maps to a tool (`sidechain_list`, `sidechain_get`, `sidechain_validate`, etc.).
+Same operations as CLI, exposed as MCP tools over JSON-RPC 2.0 stdio. Each command maps to a tool (`sidechain_list`, `sidechain_get`, `sidechain_validate`, etc.).
+
+### Standalone
 
 ```bash
 sidechain-mcp
 ```
+
+The server reads `sidechain.json` from the working directory (or `MCP_CONFIG` env var).
+
+### Claude Code
+
+Add sidechain as a project-scoped MCP server:
+
+```bash
+claude mcp add --transport stdio --scope project sidechain -- node ./dist/mcp/index.js
+```
+
+This writes to `.mcp.json` in the project root:
+
+```json
+{
+  "mcpServers": {
+    "sidechain": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./dist/mcp/index.js"]
+    }
+  }
+}
+```
+
+Verify the connection:
+
+```bash
+claude mcp list
+```
+
+Once connected, Claude Code exposes sidechain tools (`sidechain_list`, `sidechain_get`, `sidechain_set_meta`, etc.) alongside its built-in tools. Use `/mcp` inside a Claude Code session to check server status.
+
+### Available Tools
+
+| Tool                       | Description                                      |
+| -------------------------- | ------------------------------------------------ |
+| `sidechain_list`           | List all groups                                  |
+| `sidechain_get`            | Read full node                                   |
+| `sidechain_meta`           | Read metadata or single field                    |
+| `sidechain_set_meta`       | Write metadata field(s)                          |
+| `sidechain_section`        | Read single section                              |
+| `sidechain_write_section`  | Write section content                            |
+| `sidechain_append_section` | Append to section content                        |
+| `sidechain_populate`       | Write full node (metadata + sections)            |
+| `sidechain_describe`       | Describe a schema                                |
+| `sidechain_validate`       | Validate node against schema                     |
+| `sidechain_item_*`         | Item operations (get, add, update, move, delete) |
 
 ## Data Model
 

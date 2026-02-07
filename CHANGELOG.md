@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Session wrapper for Store with automatic token caching and write validation
+- Session caches tokens per (path, sectionId) on reads, injects on writes
+- Explicit token parameter takes precedence over cached token
+- Multiple Sessions on same Store operate independently
+
 ### Changed
 
 - Extract duplicated patterns from `store.ts` (2,497 to 1,498 lines, -40%) and `mcp/index.ts` (1,054 to 293 lines, -72%)
