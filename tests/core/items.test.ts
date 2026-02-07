@@ -1,32 +1,33 @@
 /**
  * Tests for Store item operations
- * Covered: IR-19, IR-20, IR-21, IR-22, EC-9, EC-11, EC-12, AC-15, AC-30
+ * Covered: IR-19, IR-20, IR-21, IR-22, EC-7, EC-8, EC-9, EC-10, EC-11, EC-12, AC-15, AC-30, AC-37
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Sidechain } from '../../src/core/store.js';
 import {
+  NotFoundError,
   SectionNotFoundError,
   StaleTokenError,
   ValidationError,
 } from '../../src/core/errors.js';
 import type { SidechainConfig } from '../../src/types/config.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStoreWithGroup,
+  cleanupTestStore,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Item Operations', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup & { groupAddress: string };
   let store: Store;
   let groupAddress: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
-
-    const config: SidechainConfig = {
+    setup = await setupTestStoreWithGroup((tempDir) => ({
       mounts: {
         main: {
           path: path.join(tempDir, 'groups'),
@@ -62,20 +63,16 @@ describe('Item Operations', () => {
           },
         },
       },
-    };
-
-    store = await Sidechain.open(config);
-
-    // Create groups directory and group
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
-    const result = await store.createGroup('test-group');
-    groupAddress = result.address;
+    }));
+    store = setup.store;
+    groupAddress = setup.groupAddress;
 
     // Initialize node with required sections and structured content
     await store.populate(`${groupAddress}/plan`, {
       metadata: { status: 'draft' },
       sections: {
         overview: 'Initial overview',
+        notes: JSON.stringify({ type: 'note', content: 'Some notes' }),
         'phase-1': [
           { id: '1.1', body: 'Task 1' },
           { id: '1.2', body: 'Task 2' },
@@ -89,7 +86,7 @@ describe('Item Operations', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('item.get(path, section, item) - retrieve item', () => {
@@ -127,7 +124,7 @@ describe('Item Operations', () => {
       expect(item.done).toBe(false);
     });
 
-    // EC-11: Section not found
+    // EC-7: Section not found
     it('throws SECTION_NOT_FOUND when section does not exist', async () => {
       await expect(
         store.item.get(`${groupAddress}/plan`, 'nonexistent', 'item-1')
@@ -140,25 +137,49 @@ describe('Item Operations', () => {
         expect((error as SectionNotFoundError).path).toBe(
           `${groupAddress}/plan/nonexistent`
         );
+        expect((error as SectionNotFoundError).message).toContain(
+          "Section 'nonexistent' not found in node"
+        );
       }
     });
 
-    it('throws error when item not found in section', async () => {
+    // EC-8: Content not array
+    it('throws VALIDATION_ERROR when section content is not an array', async () => {
       await expect(
-        store.item.get(`${groupAddress}/plan`, 'phase-1', 'nonexistent')
-      ).rejects.toThrow("Item 'nonexistent' not found in section");
+        store.item.get(`${groupAddress}/plan`, 'notes', 'item-1')
+      ).rejects.toThrow(ValidationError);
+
+      try {
+        await store.item.get(`${groupAddress}/plan`, 'notes', 'item-1');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        expect((error as ValidationError).message).toBe(
+          'Section content is not an array'
+        );
+      }
     });
 
-    it('throws error when section is not structured content', async () => {
+    // EC-9: Item not found
+    it('throws NOT_FOUND when item not found in section', async () => {
       await expect(
-        store.item.get(`${groupAddress}/plan`, 'overview', 'item-1')
-      ).rejects.toThrow();
+        store.item.get(`${groupAddress}/plan`, 'phase-1', 'nonexistent')
+      ).rejects.toThrow(NotFoundError);
+
+      try {
+        await store.item.get(`${groupAddress}/plan`, 'phase-1', 'nonexistent');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NotFoundError);
+        expect((error as NotFoundError).message).toBe(
+          "Item 'nonexistent' not found in section"
+        );
+      }
     });
   });
 
   describe('item.add(path, section, data) - add item', () => {
     // IR-20: item.add dispatches by content type
     // AC-15: item.add dispatches by section content type and validates data
+    // AC-37: Item add generates unique ID when data.id not provided
     it('adds item to structured section with auto-generated ID', async () => {
       const result = await store.item.add(`${groupAddress}/plan`, 'phase-1', {
         body: 'New task',
@@ -225,7 +246,7 @@ describe('Item Operations', () => {
     });
 
     // AC-30: Item add to text section returns VALIDATION_ERROR
-    // EC-9: Value fails schema constraint
+    // EC-10: Text section item add
     it('throws VALIDATION_ERROR when adding to text section', async () => {
       await expect(
         store.item.add(`${groupAddress}/plan`, 'overview', {
@@ -239,28 +260,40 @@ describe('Item Operations', () => {
         });
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
-        expect((error as ValidationError).message).toContain(
+        expect((error as ValidationError).message).toBe(
           'Cannot add item to text section'
         );
       }
     });
 
-    // EC-11: Section not found
+    // EC-11: Duplicate item ID
+    it('throws VALIDATION_ERROR when adding duplicate ID', async () => {
+      await expect(
+        store.item.add(`${groupAddress}/plan`, 'phase-1', {
+          id: '1.1',
+          body: 'Duplicate',
+        })
+      ).rejects.toThrow(ValidationError);
+
+      try {
+        await store.item.add(`${groupAddress}/plan`, 'phase-1', {
+          id: '1.1',
+          body: 'Duplicate',
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        expect((error as ValidationError).message).toBe(
+          "Item with id '1.1' already exists"
+        );
+      }
+    });
+
     it('throws SECTION_NOT_FOUND when section does not exist', async () => {
       await expect(
         store.item.add(`${groupAddress}/plan`, 'nonexistent', {
           body: 'Task',
         })
       ).rejects.toThrow(SectionNotFoundError);
-    });
-
-    it('throws error when adding duplicate ID', async () => {
-      await expect(
-        store.item.add(`${groupAddress}/plan`, 'phase-1', {
-          id: '1.1',
-          body: 'Duplicate',
-        })
-      ).rejects.toThrow("Item with id '1.1' already exists");
     });
   });
 
@@ -395,7 +428,6 @@ describe('Item Operations', () => {
       expect(result.ok).toBe(true);
     });
 
-    // EC-11: Section not found
     it('throws SECTION_NOT_FOUND when section does not exist', async () => {
       await expect(
         store.item.update(`${groupAddress}/plan`, 'nonexistent', '1.1', {
@@ -449,7 +481,6 @@ describe('Item Operations', () => {
       expect(items.find((i) => i.id === 'task-1')).toBeUndefined();
     });
 
-    // EC-11: Section not found
     it('throws SECTION_NOT_FOUND when section does not exist', async () => {
       await expect(
         store.item.remove(`${groupAddress}/plan`, 'nonexistent', 'item-1')

@@ -13,18 +13,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import {
-  InvalidSchemaError,
-  MappingError,
-  NameNotFoundError,
-  NotFoundError,
-  PatternMismatchError,
-  SchemaNotFoundError,
-  SectionNotFoundError,
-  StaleTokenError,
-  ValidationError,
-} from '../core/errors.js';
 import { Sidechain } from '../core/store.js';
+import { DEFAULT_CONFIG_FILE } from '../shared/constants.js';
+import { formatError } from '../shared/format-error.js';
 import type { SidechainConfig } from '../types/config.js';
 import type { ControlPlane } from '../types/control-plane.js';
 import type { Store } from '../types/store.js';
@@ -86,6 +77,40 @@ function loadConfig(configPath: string): SidechainConfig {
 }
 
 /**
+ * Require argument at index, throw if missing
+ * Covers: IR-11
+ */
+function requireArg(args: string[], index: number, name: string): string {
+  const arg = args[index];
+  if (arg === undefined) {
+    throw new Error(`Missing required argument: ${name}`);
+  }
+  return arg;
+}
+
+/**
+ * Parse JSON flag value, throw on invalid JSON
+ * Covers: IR-12
+ */
+function parseJsonFlag(
+  flags: Record<string, string | boolean>,
+  flagName: string
+): Record<string, unknown> {
+  const value = flags[flagName];
+  if (typeof value !== 'string') {
+    throw new Error(`Missing required flag: --${flagName}`);
+  }
+
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON in --${flagName}: ${error instanceof Error ? error.message : 'unknown error'}`
+    );
+  }
+}
+
+/**
  * Route commands to Store methods and return result
  */
 async function routeCommand(
@@ -109,70 +134,49 @@ async function routeCommand(
 
     case 'exists': {
       // sidechain exists <path>
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
       const exists = await store.exists(nodePath);
       return { ok: true, exists };
     }
 
     case 'get': {
       // sidechain get <path>
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
       const node = await store.get(nodePath);
       return { ok: true, ...node };
     }
 
     case 'create-group': {
       // sidechain create-group <id>
-      const schemaId = args[0];
-      if (schemaId === undefined) {
-        throw new Error('Missing required argument: schema-id');
-      }
+      const schemaId = requireArg(args, 0, 'schema-id');
       const result = await store.createGroup(schemaId);
       return { ok: true, ...result };
     }
 
     case 'delete-group': {
       // sidechain delete-group <id>
-      const groupAddress = args[0];
-      if (groupAddress === undefined) {
-        throw new Error('Missing required argument: group-address');
-      }
+      const groupAddress = requireArg(args, 0, 'group-address');
       const result = await store.deleteGroup(groupAddress);
       return result;
     }
 
     case 'describe-group': {
       // sidechain describe-group <ref>
-      const groupAddress = args[0];
-      if (groupAddress === undefined) {
-        throw new Error('Missing required argument: group-address');
-      }
+      const groupAddress = requireArg(args, 0, 'group-address');
       const result = await store.describeGroup(groupAddress);
       return { ok: true, ...result };
     }
 
     case 'validate-group': {
       // sidechain validate-group <group>
-      const groupAddress = args[0];
-      if (groupAddress === undefined) {
-        throw new Error('Missing required argument: group-address');
-      }
+      const groupAddress = requireArg(args, 0, 'group-address');
       const result = await store.validateGroup(groupAddress);
       return { ok: true, ...result };
     }
 
     case 'meta': {
       // sidechain meta <path> [field]
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
       const field = args[1];
       if (field !== undefined) {
         const result = await store.meta(nodePath, field);
@@ -208,10 +212,7 @@ async function routeCommand(
 
     case 'sections': {
       // sidechain sections <path>
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
       const result = await store.sections(nodePath);
       return { ok: true, sections: result };
     }
@@ -304,21 +305,12 @@ async function routeCommand(
 
     case 'populate': {
       // sidechain populate <path> --data '{...}' | --file <file>
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
 
       let populateData: unknown;
       if (flags['data'] !== undefined) {
         // Parse --data JSON
-        try {
-          populateData = JSON.parse(flags['data'] as string);
-        } catch (error) {
-          throw new Error(
-            `Invalid JSON in --data: ${error instanceof Error ? error.message : 'unknown error'}`
-          );
-        }
+        populateData = parseJsonFlag(flags, 'data');
       } else if (flags['file'] !== undefined) {
         // Read file content
         const filePath = flags['file'] as string;
@@ -367,47 +359,22 @@ async function routeCommand(
       switch (operation) {
         case 'get': {
           // sidechain item get <path> <section> <item>
-          const itemId = args[3];
-          if (itemId === undefined) {
-            throw new Error('Missing required argument: item-id');
-          }
+          const itemId = requireArg(args, 3, 'item-id');
           const result = await store.item.get(nodePath, sectionId, itemId);
           return { ok: true, ...result };
         }
 
         case 'add': {
           // sidechain item add <path> <section> --data '{...}'
-          const data = flags['data'];
-          if (data === undefined) {
-            throw new Error('Missing required flag: --data');
-          }
-          let parsedData: Record<string, unknown>;
-          try {
-            parsedData = JSON.parse(data as string) as Record<string, unknown>;
-          } catch (error) {
-            throw new Error(
-              `Invalid JSON in --data: ${error instanceof Error ? error.message : 'unknown error'}`
-            );
-          }
+          const parsedData = parseJsonFlag(flags, 'data');
           const result = await store.item.add(nodePath, sectionId, parsedData);
           return result;
         }
 
         case 'update': {
           // sidechain item update <path> <section> <item> --data '{...}'
-          const itemId = args[3];
-          const data = flags['data'];
-          if (itemId === undefined || data === undefined) {
-            throw new Error('Missing required arguments: item-id, --data');
-          }
-          let parsedData: Record<string, unknown>;
-          try {
-            parsedData = JSON.parse(data as string) as Record<string, unknown>;
-          } catch (error) {
-            throw new Error(
-              `Invalid JSON in --data: ${error instanceof Error ? error.message : 'unknown error'}`
-            );
-          }
+          const itemId = requireArg(args, 3, 'item-id');
+          const parsedData = parseJsonFlag(flags, 'data');
           const result = await store.item.update(
             nodePath,
             sectionId,
@@ -419,10 +386,7 @@ async function routeCommand(
 
         case 'remove': {
           // sidechain item remove <path> <section> <item>
-          const itemId = args[3];
-          if (itemId === undefined) {
-            throw new Error('Missing required argument: item-id');
-          }
+          const itemId = requireArg(args, 3, 'item-id');
           const result = await store.item.remove(nodePath, sectionId, itemId);
           return result;
         }
@@ -452,10 +416,7 @@ async function routeCommand(
 
     case 'get-schema': {
       // sidechain get-schema <id>
-      const schemaId = args[0];
-      if (schemaId === undefined) {
-        throw new Error('Missing required argument: schema-id');
-      }
+      const schemaId = requireArg(args, 0, 'schema-id');
       const result = await store.getSchema(schemaId);
       return { ok: true, schema: result };
     }
@@ -468,20 +429,14 @@ async function routeCommand(
 
     case 'describe': {
       // sidechain describe <schema-or-path>
-      const schemaOrPath = args[0];
-      if (schemaOrPath === undefined) {
-        throw new Error('Missing required argument: schema-or-path');
-      }
+      const schemaOrPath = requireArg(args, 0, 'schema-or-path');
       const result = await store.describe(schemaOrPath);
       return { ok: true, ...result };
     }
 
     case 'validate': {
       // sidechain validate <path>
-      const nodePath = args[0];
-      if (nodePath === undefined) {
-        throw new Error('Missing required argument: path');
-      }
+      const nodePath = requireArg(args, 0, 'path');
       const result = await store.validate(nodePath);
       return { ok: true, ...result };
     }
@@ -500,7 +455,9 @@ async function main(): Promise<void> {
 
     // Get config path from --config flag or default
     const configPath =
-      typeof flags['config'] === 'string' ? flags['config'] : 'sidechain.json';
+      typeof flags['config'] === 'string'
+        ? flags['config']
+        : DEFAULT_CONFIG_FILE;
 
     // Load configuration
     const config = loadConfig(configPath);
@@ -517,100 +474,7 @@ async function main(): Promise<void> {
     process.exit(0);
   } catch (error) {
     // Format error as JSON with specific fields per error type
-    let errorResult: {
-      ok: false;
-      error: string;
-      message: string;
-      path?: string;
-      schema?: string;
-      current?: unknown;
-      token?: string;
-      pattern?: string;
-      details?: unknown;
-    };
-
-    if (error instanceof ValidationError) {
-      errorResult = {
-        ok: false,
-        error: 'VALIDATION_ERROR',
-        path: error.path,
-        message: error.message,
-      };
-      if (error.schema !== undefined) {
-        errorResult.schema = error.schema;
-      }
-    } else if (error instanceof NotFoundError) {
-      errorResult = {
-        ok: false,
-        error: 'NOT_FOUND',
-        path: error.path,
-        message: error.message,
-      };
-    } else if (error instanceof SectionNotFoundError) {
-      errorResult = {
-        ok: false,
-        error: 'SECTION_NOT_FOUND',
-        path: error.path,
-        message: error.message,
-      };
-    } else if (error instanceof StaleTokenError) {
-      errorResult = {
-        ok: false,
-        error: 'STALE_TOKEN',
-        path: error.path,
-        message: error.message,
-        current: error.current,
-        token: error.token,
-      };
-    } else if (error instanceof PatternMismatchError) {
-      errorResult = {
-        ok: false,
-        error: 'PATTERN_MISMATCH',
-        path: error.path,
-        pattern: error.pattern,
-        message: error.message,
-      };
-    } else if (error instanceof SchemaNotFoundError) {
-      errorResult = {
-        ok: false,
-        error: 'SCHEMA_NOT_FOUND',
-        schema: error.schema,
-        message: error.message,
-      };
-    } else if (error instanceof InvalidSchemaError) {
-      errorResult = {
-        ok: false,
-        error: 'INVALID_SCHEMA',
-        message: error.message,
-      };
-      if (error.details !== undefined) {
-        errorResult.details = error.details;
-      }
-    } else if (error instanceof NameNotFoundError) {
-      errorResult = {
-        ok: false,
-        error: 'NAME_NOT_FOUND',
-        message: error.message,
-      };
-    } else if (error instanceof MappingError) {
-      errorResult = {
-        ok: false,
-        error: 'MAPPING_ERROR',
-        message: error.message,
-      };
-    } else if (error instanceof Error) {
-      errorResult = {
-        ok: false,
-        error: 'INTERNAL_ERROR',
-        message: error.message,
-      };
-    } else {
-      errorResult = {
-        ok: false,
-        error: 'INTERNAL_ERROR',
-        message: 'An unknown error occurred',
-      };
-    }
+    const errorResult = formatError(error);
 
     console.log(JSON.stringify(errorResult, null, 2));
 

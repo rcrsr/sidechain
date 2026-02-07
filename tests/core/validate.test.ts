@@ -4,19 +4,23 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Sidechain } from '../../src/core/store.js';
+import { Sidechain } from '../../src/core/index.js';
 import { FilesystemBackend } from '../../src/backends/filesystem.js';
 import type { RawNode } from '../../src/types/backend.js';
 import type { SidechainConfig } from '../../src/types/config.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStoreWithGroup,
+  cleanupTestStore,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Describe and Validate Operations', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup & { groupAddress: string };
   let store: Store;
   let groupAddress: string;
   let backend: FilesystemBackend;
@@ -28,10 +32,9 @@ describe('Describe and Validate Operations', () => {
   }
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
     backend = new FilesystemBackend({ nodeExtension: '.md' });
 
-    const config: SidechainConfig = {
+    setup = await setupTestStoreWithGroup((tempDir) => ({
       mounts: {
         main: {
           path: path.join(tempDir, 'groups'),
@@ -90,21 +93,16 @@ describe('Describe and Validate Operations', () => {
           description: 'Schemaless node for structural checks',
         },
       },
-    };
-
-    store = await Sidechain.open(config);
-
-    // Create groups directory and group
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
-    const result = await store.createGroup('test-group');
-    groupAddress = result.address;
+    }));
+    store = setup.store;
+    groupAddress = setup.groupAddress;
 
     // Store group path for backend access
-    groupPath = path.join(tempDir, 'groups', groupAddress);
+    groupPath = path.join(setup.groupsDir, groupAddress);
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('describe(schemaOrPath) - schema description', () => {
@@ -152,7 +150,7 @@ describe('Describe and Validate Operations', () => {
       const minimalConfig: SidechainConfig = {
         mounts: {
           main: {
-            path: path.join(tempDir, 'minimal'),
+            path: path.join(setup.tempDir, 'minimal'),
             groupSchema: 'minimal-group',
           },
         },
@@ -408,7 +406,7 @@ describe('Describe and Validate Operations', () => {
       const noVersionConfig: SidechainConfig = {
         mounts: {
           main: {
-            path: path.join(tempDir, 'noversion'),
+            path: path.join(setup.tempDir, 'noversion'),
             groupSchema: 'nv-group',
           },
         },
@@ -429,7 +427,9 @@ describe('Describe and Validate Operations', () => {
         },
       };
 
-      await fs.mkdir(path.join(tempDir, 'noversion'), { recursive: true });
+      await fs.mkdir(path.join(setup.tempDir, 'noversion'), {
+        recursive: true,
+      });
       const nvStore = await Sidechain.open(noVersionConfig);
       const nvResult = await nvStore.createGroup('nv-group');
 

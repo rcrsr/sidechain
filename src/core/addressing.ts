@@ -3,6 +3,7 @@
  * Handles hierarchical addressing: <group>/<slot>/<section>/<item>
  */
 
+import { GROUP_ADDRESS_PREFIX } from '../shared/constants.js';
 import { NameNotFoundError } from './errors.js';
 
 /**
@@ -135,7 +136,8 @@ export class InMemoryAddressResolver implements AddressResolver {
  * Format: sc_g_<hex-hash>
  */
 export function isValidGroupAddress(address: string): boolean {
-  return /^sc_g_[a-f0-9]+$/.test(address);
+  const pattern = new RegExp(`^${GROUP_ADDRESS_PREFIX}[a-f0-9]+$`);
+  return pattern.test(address);
 }
 
 /**
@@ -152,5 +154,5 @@ export function generateGroupAddress(schemaId: string, salt: string): string {
     hash = hash & hash;
   }
   const hex = Math.abs(hash).toString(16).padStart(16, '0');
-  return `sc_g_${hex}`;
+  return `${GROUP_ADDRESS_PREFIX}${hex}`;
 }

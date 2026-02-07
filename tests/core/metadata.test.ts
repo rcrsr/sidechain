@@ -3,81 +3,28 @@
  * Covered: IR-8, IR-9, IR-10, IR-11, EC-9, EC-12, AC-10, AC-16, AC-22, AC-27, AC-28
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Sidechain } from '../../src/core/store.js';
 import { StaleTokenError, ValidationError } from '../../src/core/errors.js';
-import type { SidechainConfig } from '../../src/types/config.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStoreWithGroup,
+  cleanupTestStore,
+  createTestConfigWithMetadata,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Metadata Operations', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup & { groupAddress: string };
   let store: Store;
   let groupAddress: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
-
-    const config: SidechainConfig = {
-      mounts: {
-        main: {
-          path: path.join(tempDir, 'groups'),
-          groupSchema: 'test-group',
-        },
-      },
-      groupSchemas: {
-        'test-group': {
-          'schema-id': 'test-group',
-          slots: [{ id: 'requirements', schema: 'test-node' }],
-        },
-      },
-      nodeSchemas: {
-        'test-node': {
-          'schema-id': 'test-node',
-          metadata: {
-            fields: {
-              status: {
-                type: 'enum',
-                values: ['draft', 'in-progress', 'completed'],
-                required: true,
-                description: 'Current status of the node',
-              },
-              priority: {
-                type: 'enum',
-                values: ['low', 'medium', 'high'],
-                description: 'Priority level',
-              },
-              assignee: {
-                type: 'string',
-                description: 'Assigned person',
-              },
-              dueDate: {
-                type: 'date',
-                description: 'Due date in YYYY-MM-DD format',
-              },
-              tags: {
-                type: 'string[]',
-                description: 'Tags for categorization',
-              },
-            },
-          },
-          sections: {
-            required: [{ id: 'overview', type: 'text' }],
-          },
-        },
-      },
-    };
-
-    store = await Sidechain.open(config);
-
-    // Create groups directory and group
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
-    const result = await store.createGroup('test-group');
-    groupAddress = result.address;
+    setup = await setupTestStoreWithGroup((tempDir) =>
+      createTestConfigWithMetadata(tempDir)
+    );
+    store = setup.store;
+    groupAddress = setup.groupAddress;
 
     // Initialize node with required metadata
     await store.populate(`${groupAddress}/requirements`, {
@@ -87,7 +34,7 @@ describe('Metadata Operations', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('meta(path) - read all metadata', () => {

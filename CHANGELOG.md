@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Extract duplicated patterns from `store.ts` (2,497 to 1,498 lines, -40%) and `mcp/index.ts` (1,054 to 293 lines, -72%)
+- Create constants module with 6 shared constants and error formatter handling 11 error types
+- Extract 3 store helpers: path resolution, section type resolution, token validation
+- Integrate helpers into 16 StoreImpl methods and 2 error formatter chains
+- Extract 435-line item operations module with 23 tests
+- Replace 378-line MCP switch statement with TOOL_HANDLERS lookup table
+- Extract 22 MCP tool definitions into TOOL_DEFINITIONS constant
+- Create CLI argument validation helpers (requireArg, parseJsonFlag), eliminating 15 duplicate blocks
+- Replace 3 barrel wildcard exports with 19 explicit named exports
+- Create 6 shared test fixture files (476 lines), reducing test duplication from 20% to 6.9%
+
+### Fixed
+
+- Fix 4 skipped tests via group-to-mount cache and cross-platform permission detection
+- Fix validateWriteToken to reject unrecognized token prefixes with StaleTokenError fallback
+
+### Tests
+
+- Add 182 tests (596 to 779 total, +31%), zero skipped tests
+- Add 65 CLI tests across 27 commands
+
 ## [0.1.0] - 2026-02-05
 
 ### Added

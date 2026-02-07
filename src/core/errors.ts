@@ -19,7 +19,7 @@ export class SidechainError extends Error {
 
 /**
  * Value fails schema constraint
- * EC-1
+ * EC-9
  */
 export class ValidationError extends SidechainError {
   constructor(
@@ -33,7 +33,7 @@ export class ValidationError extends SidechainError {
 
 /**
  * Group or slot does not exist
- * EC-2
+ * EC-10
  */
 export class NotFoundError extends SidechainError {
   constructor(
@@ -46,7 +46,7 @@ export class NotFoundError extends SidechainError {
 
 /**
  * Section ID not present in node
- * EC-4
+ * EC-11
  */
 export class SectionNotFoundError extends SidechainError {
   constructor(
@@ -59,7 +59,7 @@ export class SectionNotFoundError extends SidechainError {
 
 /**
  * Content changed since token issued
- * EC-5
+ * EC-12
  */
 export class StaleTokenError extends SidechainError {
   constructor(
@@ -100,7 +100,7 @@ export class SchemaNotFoundError extends SidechainError {
 
 /**
  * Dynamic section ID fails pattern
- * EC-8
+ * EC-13
  */
 export class PatternMismatchError extends SidechainError {
   constructor(
@@ -124,7 +124,7 @@ export class NameNotFoundError extends SidechainError {
 
 /**
  * Client mapping file error
- * EC-9
+ * EC-4/EC-5
  */
 export class MappingError extends SidechainError {
   constructor(message: string) {

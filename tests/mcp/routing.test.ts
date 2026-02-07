@@ -1,15 +1,17 @@
 /**
  * Tests for MCP tool routing
- * Covers: IC-13
+ * Covers: IC-13, EC-13, EC-14, EC-15
  *
  * Validates:
  * - All 22 tool calls route correctly to Store methods
  * - Overload handling for set_meta (field+value vs fields)
  * - Parameter variant handling for describe and describe_group
+ * - Error handling: unknown tool, missing arg, invalid arg type
  */
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { routeToolCall } from '../../src/mcp/router.js';
 import type { ControlPlane } from '../../src/types/control-plane.js';
 import type { ItemOps } from '../../src/types/item.js';
 import type { Store } from '../../src/types/store.js';
@@ -55,390 +57,6 @@ function createMockStore(): Store & ControlPlane {
     info: vi.fn(),
     listContentTypes: vi.fn(),
   };
-}
-
-/**
- * Helper to simulate tool call routing
- * Extracted from src/mcp/index.ts for testing
- */
-async function routeToolCall(
-  toolName: string,
-  args: Record<string, unknown>,
-  store: Store & ControlPlane
-): Promise<unknown> {
-  switch (toolName) {
-    case 'sidechain_list': {
-      if (typeof args['group'] === 'string') {
-        const slots = await store.list(args['group']);
-        return { ok: true, slots };
-      } else {
-        const groups = await store.list();
-        return { ok: true, groups };
-      }
-    }
-
-    case 'sidechain_get': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      const node = await store.get(args['path']);
-      return { ok: true, ...node };
-    }
-
-    case 'sidechain_exists': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      const exists = await store.exists(args['path']);
-      return { ok: true, exists };
-    }
-
-    case 'sidechain_create_group': {
-      if (typeof args['id'] !== 'string') {
-        throw new Error('Missing required argument: id');
-      }
-      const result = await store.createGroup(args['id']);
-      return { ok: true, ...result };
-    }
-
-    case 'sidechain_delete_group': {
-      if (typeof args['id'] !== 'string') {
-        throw new Error('Missing required argument: id');
-      }
-      const result = await store.deleteGroup(args['id']);
-      return result;
-    }
-
-    case 'sidechain_describe_group': {
-      // Handle parameter variants: { schema } | { group }
-      if (typeof args['schema'] === 'string') {
-        // Describe schema structure
-        const schema = await store.getSchema(args['schema']);
-        return { ok: true, schema };
-      } else if (typeof args['group'] === 'string') {
-        // Describe group instance
-        const description = await store.describeGroup(args['group']);
-        return { ok: true, ...description };
-      } else {
-        throw new Error('Missing required argument: schema or group');
-      }
-    }
-
-    case 'sidechain_validate_group': {
-      if (typeof args['group'] !== 'string') {
-        throw new Error('Missing required argument: group');
-      }
-      const result = await store.validateGroup(args['group']);
-      return { ok: true, ...result };
-    }
-
-    case 'sidechain_meta': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['field'] === 'string') {
-        // Read single field
-        const result = await store.meta(args['path'], args['field']);
-        return { ok: true, ...result };
-      } else {
-        // Read all metadata
-        const result = await store.meta(args['path']);
-        return { ok: true, ...result };
-      }
-    }
-
-    case 'sidechain_set_meta': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-
-      // Extract token if present
-      const token =
-        typeof args['token'] === 'string' ? args['token'] : undefined;
-      const opts = token !== undefined ? { token } : undefined;
-
-      // Handle overload: { field, value } vs { fields }
-      if (typeof args['field'] === 'string' && args['value'] !== undefined) {
-        // Single field variant
-        const result = await store.setMeta(
-          args['path'],
-          args['field'],
-          args['value'],
-          opts
-        );
-        return result;
-      } else if (
-        typeof args['fields'] === 'object' &&
-        args['fields'] !== null &&
-        !Array.isArray(args['fields'])
-      ) {
-        // Multiple fields variant
-        const result = await store.setMeta(
-          args['path'],
-          args['fields'] as Record<string, unknown>,
-          opts
-        );
-        return result;
-      } else {
-        throw new Error('Missing required argument: field+value or fields');
-      }
-    }
-
-    case 'sidechain_sections': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      const sections = await store.sections(args['path']);
-      return { ok: true, sections };
-    }
-
-    case 'sidechain_section': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      const result = await store.section(args['path'], args['section']);
-      return { ok: true, ...result };
-    }
-
-    case 'sidechain_write_section': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (args['content'] === undefined) {
-        throw new Error('Missing required argument: content');
-      }
-
-      const token =
-        typeof args['token'] === 'string' ? args['token'] : undefined;
-      const opts = token !== undefined ? { token } : undefined;
-
-      const result = await store.writeSection(
-        args['path'],
-        args['section'],
-        args['content'],
-        opts
-      );
-      return result;
-    }
-
-    case 'sidechain_append_section': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (typeof args['content'] !== 'string') {
-        throw new Error('Missing required argument: content');
-      }
-
-      const token =
-        typeof args['token'] === 'string' ? args['token'] : undefined;
-      const opts = token !== undefined ? { token } : undefined;
-
-      const result = await store.appendSection(
-        args['path'],
-        args['section'],
-        args['content'],
-        opts
-      );
-      return result;
-    }
-
-    case 'sidechain_add_section': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['id'] !== 'string') {
-        throw new Error('Missing required argument: id');
-      }
-      if (typeof args['type'] !== 'string') {
-        throw new Error('Missing required argument: type');
-      }
-
-      const def: { id: string; type: string; after?: string } = {
-        id: args['id'],
-        type: args['type'],
-      };
-
-      if (typeof args['after'] === 'string') {
-        def.after = args['after'];
-      }
-
-      const result = await store.addSection(args['path'], def);
-      return result;
-    }
-
-    case 'sidechain_remove_section': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      const result = await store.removeSection(args['path'], args['section']);
-      return result;
-    }
-
-    case 'sidechain_populate': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-
-      // PopulateData requires sections field (can be empty object)
-      const data: {
-        metadata?: Record<string, unknown>;
-        sections: Record<string, unknown>;
-      } = {
-        sections: {},
-      };
-
-      if (
-        typeof args['metadata'] === 'object' &&
-        args['metadata'] !== null &&
-        !Array.isArray(args['metadata'])
-      ) {
-        data.metadata = args['metadata'] as Record<string, unknown>;
-      }
-
-      if (
-        typeof args['sections'] === 'object' &&
-        args['sections'] !== null &&
-        !Array.isArray(args['sections'])
-      ) {
-        data.sections = args['sections'] as Record<string, unknown>;
-      }
-
-      const token =
-        typeof args['token'] === 'string' ? args['token'] : undefined;
-      const opts = token !== undefined ? { token } : undefined;
-
-      const result = await store.populate(args['path'], data, opts);
-      return result;
-    }
-
-    case 'sidechain_item_get': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (typeof args['item'] !== 'string') {
-        throw new Error('Missing required argument: item');
-      }
-      const result = await store.item.get(
-        args['path'],
-        args['section'],
-        args['item']
-      );
-      return { ok: true, ...result };
-    }
-
-    case 'sidechain_item_add': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (
-        typeof args['data'] !== 'object' ||
-        args['data'] === null ||
-        Array.isArray(args['data'])
-      ) {
-        throw new Error('Missing required argument: data (must be object)');
-      }
-      const result = await store.item.add(
-        args['path'],
-        args['section'],
-        args['data'] as Record<string, unknown>
-      );
-      return result;
-    }
-
-    case 'sidechain_item_update': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (typeof args['item'] !== 'string') {
-        throw new Error('Missing required argument: item');
-      }
-      if (
-        typeof args['data'] !== 'object' ||
-        args['data'] === null ||
-        Array.isArray(args['data'])
-      ) {
-        throw new Error('Missing required argument: data (must be object)');
-      }
-
-      const token =
-        typeof args['token'] === 'string' ? args['token'] : undefined;
-      const opts = token !== undefined ? { token } : undefined;
-
-      const result = await store.item.update(
-        args['path'],
-        args['section'],
-        args['item'],
-        args['data'] as Record<string, unknown>,
-        opts
-      );
-      return result;
-    }
-
-    case 'sidechain_item_remove': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      if (typeof args['section'] !== 'string') {
-        throw new Error('Missing required argument: section');
-      }
-      if (typeof args['item'] !== 'string') {
-        throw new Error('Missing required argument: item');
-      }
-      const result = await store.item.remove(
-        args['path'],
-        args['section'],
-        args['item']
-      );
-      return result;
-    }
-
-    case 'sidechain_describe': {
-      // Handle parameter variants: { schema } | { path }
-      if (typeof args['schema'] === 'string') {
-        // Describe schema by ID
-        const description = await store.describe(args['schema']);
-        return { ok: true, ...description };
-      } else if (typeof args['path'] === 'string') {
-        // Describe node by path
-        const description = await store.describe(args['path']);
-        return { ok: true, ...description };
-      } else {
-        throw new Error('Missing required argument: schema or path');
-      }
-    }
-
-    case 'sidechain_validate': {
-      if (typeof args['path'] !== 'string') {
-        throw new Error('Missing required argument: path');
-      }
-      const result = await store.validate(args['path']);
-      return { ok: true, ...result };
-    }
-
-    default:
-      throw new Error(`Unknown tool: ${toolName}`);
-  }
 }
 
 describe('MCP Tool Routing', () => {
@@ -1249,11 +867,27 @@ describe('MCP Tool Routing', () => {
     });
   });
 
-  describe('Unknown tool', () => {
-    test('throws error for unknown tool name', async () => {
+  describe('Error handling', () => {
+    test('throws error for unknown tool name [EC-13]', async () => {
       await expect(
         routeToolCall('sidechain_unknown', {}, store)
       ).rejects.toThrow('Unknown tool: sidechain_unknown');
+    });
+
+    test('throws error for missing required string argument [EC-14]', async () => {
+      await expect(
+        routeToolCall('sidechain_section', { path: 'sc_g_123/spec' }, store)
+      ).rejects.toThrow('Missing required argument: section');
+    });
+
+    test('throws error for invalid argument type with (must be object) suffix [EC-15]', async () => {
+      await expect(
+        routeToolCall(
+          'sidechain_item_add',
+          { path: 'sc_g_123/plan', section: 'phase-1', data: 'invalid-string' },
+          store
+        )
+      ).rejects.toThrow('Missing required argument: data (must be object)');
     });
   });
 });

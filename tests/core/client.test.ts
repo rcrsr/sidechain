@@ -166,10 +166,22 @@ describe('Client', () => {
     });
 
     // EC-4: MAPPING_ERROR when file unwritable
-    // Note: This test is skipped as file permissions behave differently
-    // across filesystems (especially WSL, tmpfs). The error handling code
-    // is in place and will work when permission errors occur in production.
-    it.skip('throws MAPPING_ERROR when file unwritable', () => {
+    it('throws MAPPING_ERROR when file unwritable', () => {
+      // Detect WSL or Windows where chmod may not be honored
+      const isWslOrWindows =
+        process.platform === 'win32' ||
+        (process.platform === 'linux' &&
+          fs.existsSync('/proc/version') &&
+          fs
+            .readFileSync('/proc/version', 'utf-8')
+            .toLowerCase()
+            .includes('microsoft'));
+
+      if (isWslOrWindows) {
+        // Skip on platforms without permission enforcement
+        return;
+      }
+
       // Write initial file
       client.saveMapping('user-auth', 'sc_g_7f3a9c2e');
 

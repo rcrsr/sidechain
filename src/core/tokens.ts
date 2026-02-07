@@ -5,15 +5,10 @@
 
 import * as crypto from 'node:crypto';
 
-/**
- * Token prefix for node-level tokens (covers all metadata + sections)
- */
-const NODE_TOKEN_PREFIX = 'sc_t_node_';
-
-/**
- * Token prefix for section-level tokens (covers single section content)
- */
-const SECTION_TOKEN_PREFIX = 'sc_t_sec_';
+import {
+  TOKEN_PREFIX_NODE,
+  TOKEN_PREFIX_SECTION,
+} from '../shared/constants.js';
 
 /**
  * Enforcement mode for token validation
@@ -26,7 +21,7 @@ export type TokenMode = 'permissive' | 'strict';
  */
 export function generateNodeToken(content: unknown, salt: string): string {
   const hash = hashContent(content, salt);
-  return `${NODE_TOKEN_PREFIX}${hash}`;
+  return `${TOKEN_PREFIX_NODE}${hash}`;
 }
 
 /**
@@ -35,7 +30,7 @@ export function generateNodeToken(content: unknown, salt: string): string {
  */
 export function generateSectionToken(content: unknown, salt: string): string {
   const hash = hashContent(content, salt);
-  return `${SECTION_TOKEN_PREFIX}${hash}`;
+  return `${TOKEN_PREFIX_SECTION}${hash}`;
 }
 
 /**
@@ -92,10 +87,10 @@ function generateTokenForContent(
   content: unknown,
   salt: string
 ): string {
-  if (providedToken.startsWith(NODE_TOKEN_PREFIX)) {
+  if (providedToken.startsWith(TOKEN_PREFIX_NODE)) {
     return generateNodeToken(content, salt);
   }
-  if (providedToken.startsWith(SECTION_TOKEN_PREFIX)) {
+  if (providedToken.startsWith(TOKEN_PREFIX_SECTION)) {
     return generateSectionToken(content, salt);
   }
   // Invalid token prefix - will not match, causing validation failure

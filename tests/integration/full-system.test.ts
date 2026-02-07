@@ -6,13 +6,11 @@
  * validating schema enforcement, concurrency, error cascading, and boundary conditions.
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Sidechain } from '../../src/core/store.js';
+import { Sidechain } from '../../src/core/index.js';
 import {
   NotFoundError,
   PatternMismatchError,
@@ -22,93 +20,97 @@ import {
 import type { SidechainConfig } from '../../src/types/config.js';
 import type { GroupSchema, NodeSchema } from '../../src/types/schema.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStore,
+  cleanupTestStore,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Full System Integration', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup;
   let store: Store;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'full-system-test-'));
+    setup = await setupTestStore((tempDir) => {
+      const groupSchema: GroupSchema = {
+        'schema-id': 'test-group',
+        description: 'Test group for full system integration',
+        slots: [
+          { id: 'requirements', schema: 'test-node' },
+          { id: 'plan', schema: 'plan-node' },
+        ],
+      };
 
-    const groupSchema: GroupSchema = {
-      'schema-id': 'test-group',
-      description: 'Test group for full system integration',
-      slots: [
-        { id: 'requirements', schema: 'test-node' },
-        { id: 'plan', schema: 'plan-node' },
-      ],
-    };
-
-    const nodeSchema: NodeSchema = {
-      'schema-id': 'test-node',
-      metadata: {
-        required: ['schema-id'],
-        fields: {
-          'schema-id': { type: 'string' },
-          status: {
-            type: 'enum',
-            values: ['draft', 'locked'],
-            description: 'draft = in progress, locked = finalized',
-          },
-          locked: {
-            type: 'boolean',
-            description: 'Lock flag preventing deletion',
-          },
-          blocks: {
-            type: 'string[]',
-            description: 'Forward references to other nodes',
-          },
-        },
-      },
-      sections: {
-        required: [{ id: 'overview', type: 'text' }],
-        optional: [{ id: 'details', type: 'text' }],
-      },
-    };
-
-    const planSchema: NodeSchema = {
-      'schema-id': 'plan-node',
-      metadata: {
-        required: ['schema-id'],
-        fields: {
-          'schema-id': { type: 'string' },
-          status: {
-            type: 'enum',
-            values: ['draft', 'locked'],
-          },
-          locked: {
-            type: 'boolean',
+      const nodeSchema: NodeSchema = {
+        'schema-id': 'test-node',
+        metadata: {
+          required: ['schema-id'],
+          fields: {
+            'schema-id': { type: 'string' },
+            status: {
+              type: 'enum',
+              values: ['draft', 'locked'],
+              description: 'draft = in progress, locked = finalized',
+            },
+            locked: {
+              type: 'boolean',
+              description: 'Lock flag preventing deletion',
+            },
+            blocks: {
+              type: 'string[]',
+              description: 'Forward references to other nodes',
+            },
           },
         },
-      },
-      sections: {
-        required: [{ id: 'overview', type: 'text' }],
-        optional: [{ id: 'tasks', type: 'task-list' }],
-        dynamic: [{ 'id-pattern': 'phase-{n}', type: 'task-list', min: 1 }],
-      },
-    };
-
-    const config: SidechainConfig = {
-      mounts: {
-        main: {
-          path: path.join(tempDir, 'groups'),
-          groupSchema: 'test-group',
+        sections: {
+          required: [{ id: 'overview', type: 'text' }],
+          optional: [{ id: 'details', type: 'text' }],
         },
-      },
-      groupSchemas: {
-        'test-group': groupSchema,
-      },
-      nodeSchemas: {
-        'test-node': nodeSchema,
-        'plan-node': planSchema,
-      },
-    };
+      };
 
-    store = await Sidechain.open(config);
+      const planSchema: NodeSchema = {
+        'schema-id': 'plan-node',
+        metadata: {
+          required: ['schema-id'],
+          fields: {
+            'schema-id': { type: 'string' },
+            status: {
+              type: 'enum',
+              values: ['draft', 'locked'],
+            },
+            locked: {
+              type: 'boolean',
+            },
+          },
+        },
+        sections: {
+          required: [{ id: 'overview', type: 'text' }],
+          optional: [{ id: 'tasks', type: 'task-list' }],
+          dynamic: [{ 'id-pattern': 'phase-{n}', type: 'task-list', min: 1 }],
+        },
+      };
+
+      return {
+        mounts: {
+          main: {
+            path: path.join(tempDir, 'groups'),
+            groupSchema: 'test-group',
+          },
+        },
+        groupSchemas: {
+          'test-group': groupSchema,
+        },
+        nodeSchemas: {
+          'test-node': nodeSchema,
+          'plan-node': planSchema,
+        },
+      };
+    });
+    store = setup.store;
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('End-to-End Workflow', () => {
@@ -255,7 +257,7 @@ describe('Full System Integration', () => {
       const config: SidechainConfig = {
         mounts: {
           main: {
-            path: path.join(tempDir, 'groups2'),
+            path: path.join(setup.tempDir, 'groups2'),
             groupSchema: 'strict-group',
           },
         },
@@ -705,10 +707,7 @@ describe('Full System Integration', () => {
   });
 
   // AC-31: Error cascade - delete locked group -> VALIDATION_ERROR
-  // SKIPPED: Implementation blocker - Backend.listGroups() returns node schema instead of group schema
-  // This prevents deleteGroup validation from working correctly
-  // See tests/core/store.test.ts for details on this known issue
-  describe.skip('Error Cascade - Delete Locked Group', () => {
+  describe('Error Cascade - Delete Locked Group', () => {
     it('deleteGroup with locked nodes throws VALIDATION_ERROR', async () => {
       const { address } = await store.createGroup('test-group');
 

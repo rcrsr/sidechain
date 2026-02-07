@@ -11,8 +11,6 @@
  * - EC-2: deleteGroup with locked nodes throws VALIDATION_ERROR
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -27,16 +25,23 @@ import type { SidechainConfig } from '../../src/types/config.js';
 import type { GroupSchema, NodeSchema } from '../../src/types/schema.js';
 import type { Store } from '../../src/types/store.js';
 import type { ControlPlane } from '../../src/types/control-plane.js';
+import {
+  createTempDir,
+  cleanupTempDir,
+  setupTestStore,
+  cleanupTestStore,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Store Initialization', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
+    tempDir = await createTempDir();
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTempDir(tempDir);
   });
 
   // AC-1: Sidechain.open with valid config returns Store
@@ -194,14 +199,11 @@ describe('Store Initialization', () => {
 });
 
 describe('Group Operations', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup;
   let store: Store & ControlPlane;
-  let config: SidechainConfig;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
-
-    config = {
+    setup = await setupTestStore((tempDir) => ({
       mounts: {
         main: {
           path: path.join(tempDir, 'groups'),
@@ -241,16 +243,12 @@ describe('Group Operations', () => {
           },
         },
       },
-    };
-
-    store = (await Sidechain.open(config)) as Store & ControlPlane;
-
-    // Create groups directory
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
+    }));
+    store = setup.store as Store & ControlPlane;
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('createGroup', () => {
@@ -339,19 +337,20 @@ describe('Group Operations', () => {
       );
     });
 
-    it.skip('removes group directory and all slots (AC-6)', async () => {
-      // BLOCKED: Backend returns node schema instead of group schema from listGroups
-      // This prevents getGroupSchemaForGroup from working correctly
+    it('removes group directory and all slots (AC-6)', async () => {
       const result = await store.createGroup('test-group');
       await store.deleteGroup(result.address);
       const exists = await store.exists(result.address);
       expect(exists).toBe(false);
     });
 
-    it.skip('throws VALIDATION_ERROR when deleting group with locked nodes (EC-2, AC-31)', async () => {
-      // BLOCKED: Same backend contract issue prevents validation
+    it('throws VALIDATION_ERROR when deleting group with locked nodes (EC-2, AC-31)', async () => {
       const result = await store.createGroup('test-group');
       // Set status: locked on a node
+      await store.populate(`${result.address}/requirements`, {
+        metadata: { locked: true, status: 'locked' },
+        sections: { overview: 'Locked content' },
+      });
       await expect(store.deleteGroup(result.address)).rejects.toThrow(
         ValidationError
       );
@@ -381,8 +380,7 @@ describe('Group Operations', () => {
       expect(groups).toEqual([]);
     });
 
-    it.skip('returns slot summaries with empty flag (AC-8)', async () => {
-      // BLOCKED: Same backend contract issue - cannot get group schema
+    it('returns slot summaries with empty flag (AC-8)', async () => {
       const result = await store.createGroup('test-group');
       const slots = await store.list(result.address);
       expect(slots).toHaveProperty('[0].empty');
@@ -494,13 +492,11 @@ describe('Group Operations', () => {
 });
 
 describe('Error Handling', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup;
   let store: Store;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
-
-    const config: SidechainConfig = {
+    setup = await setupTestStore((tempDir) => ({
       mounts: {
         main: {
           path: path.join(tempDir, 'groups'),
@@ -527,15 +523,12 @@ describe('Error Handling', () => {
           },
         },
       },
-    };
-
-    store = await Sidechain.open(config);
-
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
+    }));
+    store = setup.store;
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   // AC-26: Write to nonexistent group returns NOT_FOUND

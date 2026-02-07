@@ -77,7 +77,34 @@ export {
   ValidationError,
 } from './errors.js';
 
-// Utility exports for advanced use cases
-export * from './addressing.js';
-export * from './schema.js';
-export * from './tokens.js';
+// Utility exports for advanced use cases (all marked [INTERNAL] in api-manifest.ts)
+
+// Addressing utilities
+export type { AddressResolver, ParsedPath } from './addressing.js';
+export {
+  generateGroupAddress,
+  InMemoryAddressResolver,
+  isValidGroupAddress,
+  parsePath,
+  slugify,
+} from './addressing.js';
+
+// Schema utilities
+export {
+  checkSchemaDrift,
+  matchDynamicPattern,
+  SchemaRegistry,
+  validateDynamicSectionId,
+  validateDynamicSectionMin,
+  validateMetadata,
+  validateMetadataField,
+} from './schema.js';
+
+// Token utilities
+export type { TokenMode } from './tokens.js';
+export {
+  generateNodeToken,
+  generateSalt,
+  generateSectionToken,
+  validateToken,
+} from './tokens.js';

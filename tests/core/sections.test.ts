@@ -3,71 +3,33 @@
  * Covered: IR-12, IR-13, IR-14, IR-15, IR-16, IR-17, IR-18, EC-11, EC-12, EC-13, AC-10, AC-11, AC-12, AC-13, AC-14, AC-29
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Sidechain } from '../../src/core/store.js';
 import {
   PatternMismatchError,
   SectionNotFoundError,
   StaleTokenError,
   ValidationError,
 } from '../../src/core/errors.js';
-import type { SidechainConfig } from '../../src/types/config.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStoreWithGroup,
+  cleanupTestStore,
+  createTestConfigWithPlan,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Section Operations', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup & { groupAddress: string };
   let store: Store;
   let groupAddress: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidechain-test-'));
-
-    const config: SidechainConfig = {
-      mounts: {
-        main: {
-          path: path.join(tempDir, 'groups'),
-          groupSchema: 'test-group',
-        },
-      },
-      groupSchemas: {
-        'test-group': {
-          'schema-id': 'test-group',
-          slots: [{ id: 'plan', schema: 'test-plan' }],
-        },
-      },
-      nodeSchemas: {
-        'test-plan': {
-          'schema-id': 'test-plan',
-          metadata: {
-            fields: {
-              status: {
-                type: 'enum',
-                values: ['draft', 'locked'],
-                required: true,
-                description: 'Plan status',
-              },
-            },
-          },
-          sections: {
-            required: [{ id: 'overview', type: 'text' }],
-            optional: [{ id: 'notes', type: 'text' }],
-            dynamic: [{ 'id-pattern': 'phase-{n}', type: 'task-list', min: 1 }],
-          },
-        },
-      },
-    };
-
-    store = await Sidechain.open(config);
-
-    // Create groups directory and group
-    await fs.mkdir(path.join(tempDir, 'groups'), { recursive: true });
-    const result = await store.createGroup('test-group');
-    groupAddress = result.address;
+    setup = await setupTestStoreWithGroup((tempDir) =>
+      createTestConfigWithPlan(tempDir)
+    );
+    store = setup.store;
+    groupAddress = setup.groupAddress;
 
     // Initialize node with required sections
     await store.populate(`${groupAddress}/plan`, {
@@ -83,7 +45,7 @@ describe('Section Operations', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   describe('sections(path) - list all sections', () => {

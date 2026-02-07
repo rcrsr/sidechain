@@ -22,6 +22,7 @@ import * as path from 'node:path';
 
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
+import { DEFAULT_NODE_EXTENSION } from '../shared/constants.js';
 import type { Backend, GroupEntry, RawNode, SlotDef } from './interface.js';
 
 /**
@@ -38,7 +39,7 @@ export class FilesystemBackend implements Backend {
   private readonly extension: string;
 
   constructor(config: FilesystemBackendConfig = {}) {
-    this.extension = config.nodeExtension ?? '.md';
+    this.extension = config.nodeExtension ?? DEFAULT_NODE_EXTENSION;
   }
 
   /**
@@ -109,7 +110,11 @@ export class FilesystemBackend implements Backend {
       }
     } catch (error) {
       // Mount path doesn't exist or can't be read - return empty array
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
         return [];
       }
       throw error;

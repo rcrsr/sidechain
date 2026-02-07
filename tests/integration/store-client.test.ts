@@ -5,78 +5,79 @@
  * Tests end-to-end workflows combining Client name resolution with Store operations.
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Client } from '../../src/core/client.js';
 import { StaleTokenError } from '../../src/core/errors.js';
-import { Sidechain } from '../../src/core/store.js';
 import type { SidechainConfig } from '../../src/types/config.js';
 import type { GroupSchema, NodeSchema } from '../../src/types/schema.js';
 import type { Store } from '../../src/types/store.js';
+import {
+  setupTestStore,
+  cleanupTestStore,
+  type TestStoreSetup,
+} from '../fixtures/index.js';
 
 describe('Store-Client Integration', () => {
-  let tempDir: string;
+  let setup: TestStoreSetup;
   let mappingPath: string;
   let client: Client;
   let store: Store;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'integration-test-'));
-    mappingPath = path.join(tempDir, 'mappings.json');
-    client = new Client(mappingPath);
+    setup = await setupTestStore((tempDir) => {
+      const groupSchema: GroupSchema = {
+        'schema-id': 'test-group',
+        slots: [
+          { id: 'requirements', schema: 'test-node' },
+          { id: 'plan', schema: 'test-node' },
+        ],
+      };
 
-    const groupSchema: GroupSchema = {
-      'schema-id': 'test-group',
-      slots: [
-        { id: 'requirements', schema: 'test-node' },
-        { id: 'plan', schema: 'test-node' },
-      ],
-    };
-
-    const nodeSchema: NodeSchema = {
-      'schema-id': 'test-node',
-      metadata: {
-        required: ['schema-id'],
-        fields: {
-          'schema-id': { type: 'string' },
-          status: {
-            type: 'enum',
-            values: ['draft', 'locked'],
+      const nodeSchema: NodeSchema = {
+        'schema-id': 'test-node',
+        metadata: {
+          required: ['schema-id'],
+          fields: {
+            'schema-id': { type: 'string' },
+            status: {
+              type: 'enum',
+              values: ['draft', 'locked'],
+            },
           },
         },
-      },
-      sections: {
-        required: [
-          { id: 'overview', type: 'text' },
-          { id: 'details', type: 'text' },
-        ],
-      },
-    };
-
-    const config: SidechainConfig = {
-      mounts: {
-        main: {
-          path: path.join(tempDir, 'groups'),
-          groupSchema: 'test-group',
+        sections: {
+          required: [
+            { id: 'overview', type: 'text' },
+            { id: 'details', type: 'text' },
+          ],
         },
-      },
-      groupSchemas: {
-        'test-group': groupSchema,
-      },
-      nodeSchemas: {
-        'test-node': nodeSchema,
-      },
-    };
+      };
 
-    store = await Sidechain.open(config);
+      return {
+        mounts: {
+          main: {
+            path: path.join(tempDir, 'groups'),
+            groupSchema: 'test-group',
+          },
+        },
+        groupSchemas: {
+          'test-group': groupSchema,
+        },
+        nodeSchemas: {
+          'test-node': nodeSchema,
+        },
+      };
+    });
+    store = setup.store;
+    mappingPath = path.join(setup.tempDir, 'mappings.json');
+    client = new Client(mappingPath);
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await cleanupTestStore(setup);
   });
 
   // AC-1: Sidechain.open(config) returns Store
@@ -693,11 +694,15 @@ describe('Store-Client Integration', () => {
       const { address } = await store.createGroup('test-group');
 
       // Client 1 maps to "user-auth"
-      const client1 = new Client(path.join(tempDir, 'client1-mappings.json'));
+      const client1 = new Client(
+        path.join(setup.tempDir, 'client1-mappings.json')
+      );
       client1.saveMapping('user-auth', address);
 
       // Client 2 maps same address to "authentication"
-      const client2 = new Client(path.join(tempDir, 'client2-mappings.json'));
+      const client2 = new Client(
+        path.join(setup.tempDir, 'client2-mappings.json')
+      );
       client2.saveMapping('authentication', address);
 
       // Both resolve to same address

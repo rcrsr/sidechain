@@ -5,6 +5,7 @@
  * EC-1, EC-2, EC-10
  */
 
+import { DEFAULT_NODE_EXTENSION } from '../shared/constants.js';
 import type { Backend, RawNode, SlotDef } from '../types/backend.js';
 import type { SidechainConfig } from '../types/config.js';
 import type {
@@ -43,6 +44,12 @@ import {
   ValidationError,
 } from './errors.js';
 import {
+  resolveNodePath,
+  resolveSectionType,
+  validateWriteToken,
+} from './helpers/index.js';
+import { createItemOperations } from './items.js';
+import {
   matchDynamicPattern,
   SchemaRegistry,
   validateDynamicSectionId,
@@ -66,6 +73,9 @@ class StoreImpl implements Store, ControlPlane {
   private readonly nodeExtension: string;
   private readonly tokenSalt: string;
 
+  // AC-7: StoreImpl.item delegates all 4 operations to extracted module
+  readonly item: ReturnType<typeof createItemOperations>;
+
   constructor(
     backend: Backend,
     registry: SchemaRegistry,
@@ -84,6 +94,14 @@ class StoreImpl implements Store, ControlPlane {
     for (const mount of mounts) {
       this.mountsMap.set(mount.id, mount);
     }
+
+    // AC-7: Initialize item operations with dependencies
+    this.item = createItemOperations({
+      backend: this.backend,
+      registry: this.registry,
+      tokenSalt: this.tokenSalt,
+      resolveGroupPath: this.resolveGroupPath.bind(this),
+    });
   }
 
   /**
@@ -103,6 +121,9 @@ class StoreImpl implements Store, ControlPlane {
         const backendGroups = await this.backend.listGroups(mount.path);
 
         for (const backendGroup of backendGroups) {
+          // Cache group-to-mount mapping for subsequent operations
+          this.groupToMount.set(backendGroup.id, mount.id);
+
           allGroups.push({
             id: backendGroup.id,
             schema: mount.groupSchema,
@@ -187,33 +208,11 @@ class StoreImpl implements Store, ControlPlane {
    * EC-10: Group or slot does not exist
    */
   async get(path: string): Promise<NodeResponse> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read raw node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Get node schema
     const nodeSchemaId = rawNode.metadata['schema-id'];
@@ -227,22 +226,7 @@ class StoreImpl implements Store, ControlPlane {
     const sections: SectionResponse[] = [];
     for (const [sectionId, content] of Object.entries(rawNode.sections)) {
       // Determine section type from schema
-      let sectionType = 'text'; // default type
-
-      if (nodeSchema.sections !== undefined) {
-        const requiredSection = nodeSchema.sections.required?.find(
-          (s) => s.id === sectionId
-        );
-        const optionalSection = nodeSchema.sections.optional?.find(
-          (s) => s.id === sectionId
-        );
-
-        if (requiredSection !== undefined) {
-          sectionType = requiredSection.type;
-        } else if (optionalSection !== undefined) {
-          sectionType = optionalSection.type;
-        }
-      }
+      const sectionType = resolveSectionType(nodeSchema, sectionId);
 
       // Generate section token
       const sectionToken = this.generateSectionToken(content);
@@ -544,33 +528,11 @@ class StoreImpl implements Store, ControlPlane {
   ): Promise<
     { metadata: Record<string, unknown>; token: string } | MetaReadResult
   > {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read raw node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Generate node token for metadata
     const nodeContent = {
@@ -626,33 +588,11 @@ class StoreImpl implements Store, ControlPlane {
     valueOrOpts?: unknown,
     optsOrUndefined?: TokenOpts
   ): Promise<MetaResult> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Determine if single field or multiple fields
     let fieldsToUpdate: Record<string, unknown>;
@@ -674,32 +614,7 @@ class StoreImpl implements Store, ControlPlane {
     }
 
     // Token validation (EC-12)
-    const currentContent = {
-      metadata: rawNode.metadata,
-      sections: rawNode.sections,
-    };
-    const currentToken = generateNodeToken(currentContent, this.tokenSalt);
-
-    if (opts?.token !== undefined) {
-      const providedToken = opts.token;
-      if (providedToken !== currentToken) {
-        // Token is stale - throw error with current state
-        throw new StaleTokenError(
-          path,
-          `Content has changed since token was issued`,
-          {
-            metadata: rawNode.metadata,
-            sections: Object.entries(rawNode.sections).map(
-              ([sectionId, content]) => ({
-                id: sectionId,
-                content,
-              })
-            ),
-          },
-          currentToken
-        );
-      }
-    }
+    validateWriteToken(rawNode, opts, path, this.tokenSalt);
 
     // Get node schema for validation
     const nodeSchemaId = rawNode.metadata['schema-id'];
@@ -743,33 +658,11 @@ class StoreImpl implements Store, ControlPlane {
    * IR-12: sections(path)
    */
   async sections(path: string): Promise<SectionSummary[]> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read raw node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Get node schema
     const nodeSchemaId = rawNode.metadata['schema-id'];
@@ -784,30 +677,7 @@ class StoreImpl implements Store, ControlPlane {
 
     for (const [sectionId, content] of Object.entries(rawNode.sections)) {
       // Determine section type from schema
-      let sectionType = 'text'; // default type
-
-      if (nodeSchema.sections !== undefined) {
-        const requiredSection = nodeSchema.sections.required?.find(
-          (s) => s.id === sectionId
-        );
-        const optionalSection = nodeSchema.sections.optional?.find(
-          (s) => s.id === sectionId
-        );
-
-        if (requiredSection !== undefined) {
-          sectionType = requiredSection.type;
-        } else if (optionalSection !== undefined) {
-          sectionType = optionalSection.type;
-        } else if (nodeSchema.sections.dynamic !== undefined) {
-          // Check dynamic sections
-          for (const dynamicDef of nodeSchema.sections.dynamic) {
-            if (matchDynamicPattern(sectionId, dynamicDef['id-pattern'])) {
-              sectionType = dynamicDef.type;
-              break;
-            }
-          }
-        }
-      }
+      const sectionType = resolveSectionType(nodeSchema, sectionId);
 
       const summary: SectionSummary = {
         id: sectionId,
@@ -831,33 +701,11 @@ class StoreImpl implements Store, ControlPlane {
    * EC-11: Section ID not present
    */
   async section(path: string, sectionId: string): Promise<SectionResponse> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read raw node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Check if section exists
     const content = rawNode.sections[sectionId];
@@ -877,30 +725,7 @@ class StoreImpl implements Store, ControlPlane {
     const nodeSchema = this.registry.getSchema(nodeSchemaId) as NodeSchema;
 
     // Determine section type
-    let sectionType = 'text'; // default type
-
-    if (nodeSchema.sections !== undefined) {
-      const requiredSection = nodeSchema.sections.required?.find(
-        (s) => s.id === sectionId
-      );
-      const optionalSection = nodeSchema.sections.optional?.find(
-        (s) => s.id === sectionId
-      );
-
-      if (requiredSection !== undefined) {
-        sectionType = requiredSection.type;
-      } else if (optionalSection !== undefined) {
-        sectionType = optionalSection.type;
-      } else if (nodeSchema.sections.dynamic !== undefined) {
-        // Check dynamic sections
-        for (const dynamicDef of nodeSchema.sections.dynamic) {
-          if (matchDynamicPattern(sectionId, dynamicDef['id-pattern'])) {
-            sectionType = dynamicDef.type;
-            break;
-          }
-        }
-      }
-    }
+    const sectionType = resolveSectionType(nodeSchema, sectionId);
 
     // Generate section token
     const sectionToken = generateSectionToken(content, this.tokenSalt);
@@ -928,33 +753,11 @@ class StoreImpl implements Store, ControlPlane {
     content: unknown,
     opts?: TokenOpts
   ): Promise<{ ok: true; path: string; token: string; nodeToken: string }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Check if section exists
     if (!(sectionId in rawNode.sections)) {
@@ -965,62 +768,7 @@ class StoreImpl implements Store, ControlPlane {
     }
 
     // Token validation (EC-12, AC-10, AC-11)
-    if (opts?.token !== undefined) {
-      const providedToken = opts.token;
-
-      // Check if token is section-scoped or node-scoped
-      if (providedToken.startsWith('sc_t_sec_')) {
-        // Section token - validate against current section content
-        const currentSectionToken = generateSectionToken(
-          rawNode.sections[sectionId],
-          this.tokenSalt
-        );
-        if (providedToken !== currentSectionToken) {
-          // Section content changed since token was issued
-          throw new StaleTokenError(
-            `${path}/${sectionId}`,
-            `Section content has changed since token was issued`,
-            {
-              metadata: rawNode.metadata,
-              sections: Object.entries(rawNode.sections).map(
-                ([id, sectionContent]) => ({
-                  id,
-                  content: sectionContent,
-                })
-              ),
-            },
-            currentSectionToken
-          );
-        }
-      } else if (providedToken.startsWith('sc_t_node_')) {
-        // Node token - validate against entire node
-        const currentNodeContent = {
-          metadata: rawNode.metadata,
-          sections: rawNode.sections,
-        };
-        const currentNodeToken = generateNodeToken(
-          currentNodeContent,
-          this.tokenSalt
-        );
-        if (providedToken !== currentNodeToken) {
-          // Node content changed since token was issued
-          throw new StaleTokenError(
-            path,
-            `Content has changed since token was issued`,
-            {
-              metadata: rawNode.metadata,
-              sections: Object.entries(rawNode.sections).map(
-                ([id, sectionContent]) => ({
-                  id,
-                  content: sectionContent,
-                })
-              ),
-            },
-            currentNodeToken
-          );
-        }
-      }
-    }
+    validateWriteToken(rawNode, opts, path, this.tokenSalt, sectionId);
 
     // Update section content
     // Content must be serialized to string for backend
@@ -1064,33 +812,11 @@ class StoreImpl implements Store, ControlPlane {
     content: string,
     opts?: TokenOpts
   ): Promise<{ ok: true; path: string; token: string; nodeToken: string }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Check if section exists
     if (!(sectionId in rawNode.sections)) {
@@ -1111,59 +837,7 @@ class StoreImpl implements Store, ControlPlane {
     }
 
     // Token validation
-    if (opts?.token !== undefined) {
-      const providedToken = opts.token;
-
-      if (providedToken.startsWith('sc_t_sec_')) {
-        // Section token
-        const currentSectionToken = generateSectionToken(
-          currentContent,
-          this.tokenSalt
-        );
-        if (providedToken !== currentSectionToken) {
-          throw new StaleTokenError(
-            `${path}/${sectionId}`,
-            `Section content has changed since token was issued`,
-            {
-              metadata: rawNode.metadata,
-              sections: Object.entries(rawNode.sections).map(
-                ([id, sectionContent]) => ({
-                  id,
-                  content: sectionContent,
-                })
-              ),
-            },
-            currentSectionToken
-          );
-        }
-      } else if (providedToken.startsWith('sc_t_node_')) {
-        // Node token
-        const currentNodeContent = {
-          metadata: rawNode.metadata,
-          sections: rawNode.sections,
-        };
-        const currentNodeToken = generateNodeToken(
-          currentNodeContent,
-          this.tokenSalt
-        );
-        if (providedToken !== currentNodeToken) {
-          throw new StaleTokenError(
-            path,
-            `Content has changed since token was issued`,
-            {
-              metadata: rawNode.metadata,
-              sections: Object.entries(rawNode.sections).map(
-                ([id, sectionContent]) => ({
-                  id,
-                  content: sectionContent,
-                })
-              ),
-            },
-            currentNodeToken
-          );
-        }
-      }
-    }
+    validateWriteToken(rawNode, opts, path, this.tokenSalt, sectionId);
 
     // Append to content
     const newContent = currentContent + content;
@@ -1203,33 +877,11 @@ class StoreImpl implements Store, ControlPlane {
     path: string,
     def: { id: string; type: string; after?: string }
   ): Promise<{ ok: true; path: string }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Get node schema
     const nodeSchemaId = rawNode.metadata['schema-id'];
@@ -1297,33 +949,11 @@ class StoreImpl implements Store, ControlPlane {
     path: string,
     sectionId: string
   ): Promise<{ ok: true; path: string }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Check if section exists
     if (!(sectionId in rawNode.sections)) {
@@ -1366,33 +996,11 @@ class StoreImpl implements Store, ControlPlane {
     metadata: number;
     token: string;
   }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read current node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { resolvedPath, slot, rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     // Token validation
     if (opts?.token !== undefined) {
@@ -1495,557 +1103,6 @@ class StoreImpl implements Store, ControlPlane {
   }
 
   /**
-   * Item operations for structured section content
-   * IR-19, IR-20, IR-21, IR-22
-   */
-  item = {
-    /**
-     * Get a single item from a structured section
-     * IR-19: item.get(path, section, item)
-     * EC-11: Section not found
-     */
-    get: async (
-      path: string,
-      sectionId: string,
-      itemId: string
-    ): Promise<{ content: unknown; token: string }> => {
-      const parts = path.split('/').filter((p) => p.length > 0);
-
-      if (parts.length < 2) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      const group = parts[0];
-      const slot = parts[1];
-
-      if (group === undefined || slot === undefined) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      if (!isValidGroupAddress(group)) {
-        throw new NotFoundError(path, `Invalid group address: ${group}`);
-      }
-
-      const resolvedPath = await this.resolveGroupPath(group);
-
-      // Check if node exists
-      const nodeExists = await this.backend.exists(resolvedPath, slot);
-      if (!nodeExists) {
-        throw new NotFoundError(path, `Node not found: ${path}`);
-      }
-
-      // Read raw node data
-      const rawNode = await this.backend.readNode(resolvedPath, slot);
-
-      // Check if section exists (EC-11)
-      const sectionContent = rawNode.sections[sectionId];
-      if (sectionContent === undefined) {
-        throw new SectionNotFoundError(
-          `${path}/${sectionId}`,
-          `Section '${sectionId}' not found in node`
-        );
-      }
-
-      // Parse section content
-      const content =
-        typeof sectionContent === 'string'
-          ? (JSON.parse(sectionContent) as unknown)
-          : sectionContent;
-
-      // Validate it's structured content (array)
-      if (!Array.isArray(content)) {
-        throw new ValidationError(
-          `${path}/${sectionId}`,
-          `Section is not structured content (expected array)`
-        );
-      }
-
-      // Find item by ID
-      const item: unknown = content.find(
-        (i: unknown) =>
-          typeof i === 'object' &&
-          i !== null &&
-          (i as { id?: string }).id === itemId
-      );
-
-      if (item === undefined) {
-        throw new NotFoundError(
-          `${path}/${sectionId}/${itemId}`,
-          `Item '${itemId}' not found in section`
-        );
-      }
-
-      // Generate section token
-      const sectionToken = generateSectionToken(sectionContent, this.tokenSalt);
-
-      return {
-        content: item,
-        token: sectionToken,
-      };
-    },
-
-    /**
-     * Add a new item to a structured section
-     * IR-20: item.add(path, section, data)
-     * AC-15: item.add dispatches by content type and validates
-     * EC-9: Value fails schema constraint
-     * EC-11: Section not found
-     */
-    add: async (
-      path: string,
-      sectionId: string,
-      data: Record<string, unknown>
-    ): Promise<{
-      ok: true;
-      path: string;
-      item: string;
-      token: string;
-      nodeToken: string;
-    }> => {
-      const parts = path.split('/').filter((p) => p.length > 0);
-
-      if (parts.length < 2) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      const group = parts[0];
-      const slot = parts[1];
-
-      if (group === undefined || slot === undefined) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      if (!isValidGroupAddress(group)) {
-        throw new NotFoundError(path, `Invalid group address: ${group}`);
-      }
-
-      const resolvedPath = await this.resolveGroupPath(group);
-
-      // Check if node exists
-      const nodeExists = await this.backend.exists(resolvedPath, slot);
-      if (!nodeExists) {
-        throw new NotFoundError(path, `Node not found: ${path}`);
-      }
-
-      // Read current node data
-      const rawNode = await this.backend.readNode(resolvedPath, slot);
-
-      // Check if section exists (EC-11)
-      const sectionContent = rawNode.sections[sectionId];
-      if (sectionContent === undefined) {
-        throw new SectionNotFoundError(
-          `${path}/${sectionId}`,
-          `Section '${sectionId}' not found in node`
-        );
-      }
-
-      // Get node schema to determine section type
-      const nodeSchemaId = rawNode.metadata['schema-id'];
-      if (typeof nodeSchemaId !== 'string') {
-        throw new ValidationError(path, `Missing schema-id in node metadata`);
-      }
-
-      const nodeSchema = this.registry.getSchema(nodeSchemaId) as NodeSchema;
-
-      // Determine section type (AC-15: dispatch by content type)
-      let sectionType = 'text'; // default type
-
-      if (nodeSchema.sections !== undefined) {
-        const requiredSection = nodeSchema.sections.required?.find(
-          (s) => s.id === sectionId
-        );
-        const optionalSection = nodeSchema.sections.optional?.find(
-          (s) => s.id === sectionId
-        );
-
-        if (requiredSection !== undefined) {
-          sectionType = requiredSection.type;
-        } else if (optionalSection !== undefined) {
-          sectionType = optionalSection.type;
-        } else if (nodeSchema.sections.dynamic !== undefined) {
-          // Check dynamic sections
-          for (const dynamicDef of nodeSchema.sections.dynamic) {
-            if (matchDynamicPattern(sectionId, dynamicDef['id-pattern'])) {
-              sectionType = dynamicDef.type;
-              break;
-            }
-          }
-        }
-      }
-
-      // EC-9: Validate that section type is not text (text sections don't support items)
-      if (sectionType === 'text') {
-        throw new ValidationError(
-          `${path}/${sectionId}`,
-          `Cannot add item to text section`
-        );
-      }
-
-      // Parse existing content
-      const existingContent: unknown =
-        typeof sectionContent === 'string'
-          ? JSON.parse(sectionContent)
-          : sectionContent;
-
-      // Validate existing content is array
-      if (!Array.isArray(existingContent)) {
-        throw new ValidationError(
-          `${path}/${sectionId}`,
-          `Section content is not an array`
-        );
-      }
-
-      // Type assertion after validation
-      const contentArray = existingContent as unknown[];
-
-      // Generate ID if not provided
-      const itemId =
-        typeof data['id'] === 'string'
-          ? data['id']
-          : `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-      // Check for duplicate ID
-      if (
-        contentArray.some(
-          (i: unknown) =>
-            typeof i === 'object' &&
-            i !== null &&
-            (i as { id?: string }).id === itemId
-        )
-      ) {
-        throw new ValidationError(
-          `${path}/${sectionId}/${itemId}`,
-          `Item with id '${itemId}' already exists`
-        );
-      }
-
-      // Add item to content
-      const newContent = [...contentArray, { ...data, id: itemId }];
-
-      // Serialize content
-      const serializedContent = JSON.stringify(newContent);
-
-      // Update node
-      const updatedNode: RawNode = {
-        metadata: rawNode.metadata,
-        sections: {
-          ...rawNode.sections,
-          [sectionId]: serializedContent,
-        },
-      };
-
-      // Write updated node
-      await this.backend.writeNode(resolvedPath, slot, updatedNode);
-
-      // Generate new tokens
-      const newSectionToken = generateSectionToken(
-        serializedContent,
-        this.tokenSalt
-      );
-      const newNodeToken = generateNodeToken(updatedNode, this.tokenSalt);
-
-      return {
-        ok: true,
-        path: `${path}/${sectionId}/${itemId}`,
-        item: itemId,
-        token: newSectionToken,
-        nodeToken: newNodeToken,
-      };
-    },
-
-    /**
-     * Update an existing item in a structured section
-     * IR-21: item.update(path, section, item, fields, opts?)
-     * EC-11: Section not found
-     * EC-12: Stale token
-     */
-    update: async (
-      path: string,
-      sectionId: string,
-      itemId: string,
-      fields: Record<string, unknown>,
-      opts?: TokenOpts
-    ): Promise<{
-      ok: true;
-      path: string;
-      item: string;
-      previous: unknown;
-      token: string;
-      nodeToken: string;
-    }> => {
-      const parts = path.split('/').filter((p) => p.length > 0);
-
-      if (parts.length < 2) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      const group = parts[0];
-      const slot = parts[1];
-
-      if (group === undefined || slot === undefined) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      if (!isValidGroupAddress(group)) {
-        throw new NotFoundError(path, `Invalid group address: ${group}`);
-      }
-
-      const resolvedPath = await this.resolveGroupPath(group);
-
-      // Check if node exists
-      const nodeExists = await this.backend.exists(resolvedPath, slot);
-      if (!nodeExists) {
-        throw new NotFoundError(path, `Node not found: ${path}`);
-      }
-
-      // Read current node data
-      const rawNode = await this.backend.readNode(resolvedPath, slot);
-
-      // Check if section exists (EC-11)
-      const sectionContent = rawNode.sections[sectionId];
-      if (sectionContent === undefined) {
-        throw new SectionNotFoundError(
-          `${path}/${sectionId}`,
-          `Section '${sectionId}' not found in node`
-        );
-      }
-
-      // Token validation (EC-12)
-      if (opts?.token !== undefined) {
-        const providedToken = opts.token;
-
-        if (providedToken.startsWith('sc_t_sec_')) {
-          // Section token
-          const currentSectionToken = generateSectionToken(
-            sectionContent,
-            this.tokenSalt
-          );
-          if (providedToken !== currentSectionToken) {
-            throw new StaleTokenError(
-              `${path}/${sectionId}`,
-              `Section content has changed since token was issued`,
-              {
-                metadata: rawNode.metadata,
-                sections: Object.entries(rawNode.sections).map(
-                  ([id, content]) => ({
-                    id,
-                    content,
-                  })
-                ),
-              },
-              currentSectionToken
-            );
-          }
-        } else if (providedToken.startsWith('sc_t_node_')) {
-          // Node token
-          const currentNodeContent = {
-            metadata: rawNode.metadata,
-            sections: rawNode.sections,
-          };
-          const currentNodeToken = generateNodeToken(
-            currentNodeContent,
-            this.tokenSalt
-          );
-          if (providedToken !== currentNodeToken) {
-            throw new StaleTokenError(
-              path,
-              `Content has changed since token was issued`,
-              {
-                metadata: rawNode.metadata,
-                sections: Object.entries(rawNode.sections).map(
-                  ([id, content]) => ({
-                    id,
-                    content,
-                  })
-                ),
-              },
-              currentNodeToken
-            );
-          }
-        }
-      }
-
-      // Parse existing content
-      const existingContent: unknown =
-        typeof sectionContent === 'string'
-          ? JSON.parse(sectionContent)
-          : sectionContent;
-
-      // Validate existing content is array
-      if (!Array.isArray(existingContent)) {
-        throw new ValidationError(
-          `${path}/${sectionId}`,
-          `Section content is not an array`
-        );
-      }
-
-      // Type assertion after validation
-      const contentArray = existingContent as unknown[];
-
-      // Find item index
-      const itemIndex = contentArray.findIndex(
-        (i: unknown) =>
-          typeof i === 'object' &&
-          i !== null &&
-          (i as { id?: string }).id === itemId
-      );
-
-      if (itemIndex === -1) {
-        throw new NotFoundError(
-          `${path}/${sectionId}/${itemId}`,
-          `Item '${itemId}' not found in section`
-        );
-      }
-
-      const existingItem: unknown = contentArray[itemIndex];
-
-      // Update item - merge existing with updates
-      const updatedItem =
-        typeof existingItem === 'object' && existingItem !== null
-          ? { ...(existingItem as Record<string, unknown>), ...fields }
-          : { ...fields };
-      const newContent = [...contentArray];
-      newContent[itemIndex] = updatedItem;
-
-      // Serialize content
-      const serializedContent = JSON.stringify(newContent);
-
-      // Update node
-      const updatedNode: RawNode = {
-        metadata: rawNode.metadata,
-        sections: {
-          ...rawNode.sections,
-          [sectionId]: serializedContent,
-        },
-      };
-
-      // Write updated node
-      await this.backend.writeNode(resolvedPath, slot, updatedNode);
-
-      // Generate new tokens
-      const newSectionToken = generateSectionToken(
-        serializedContent,
-        this.tokenSalt
-      );
-      const newNodeToken = generateNodeToken(updatedNode, this.tokenSalt);
-
-      return {
-        ok: true,
-        path: `${path}/${sectionId}/${itemId}`,
-        item: itemId,
-        previous: existingItem,
-        token: newSectionToken,
-        nodeToken: newNodeToken,
-      };
-    },
-
-    /**
-     * Remove an item from a structured section
-     * IR-22: item.remove(path, section, item)
-     * EC-11: Section not found
-     */
-    remove: async (
-      path: string,
-      sectionId: string,
-      itemId: string
-    ): Promise<{ ok: true; path: string }> => {
-      const parts = path.split('/').filter((p) => p.length > 0);
-
-      if (parts.length < 2) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      const group = parts[0];
-      const slot = parts[1];
-
-      if (group === undefined || slot === undefined) {
-        throw new NotFoundError(path, `Invalid node path: ${path}`);
-      }
-
-      if (!isValidGroupAddress(group)) {
-        throw new NotFoundError(path, `Invalid group address: ${group}`);
-      }
-
-      const resolvedPath = await this.resolveGroupPath(group);
-
-      // Check if node exists
-      const nodeExists = await this.backend.exists(resolvedPath, slot);
-      if (!nodeExists) {
-        throw new NotFoundError(path, `Node not found: ${path}`);
-      }
-
-      // Read current node data
-      const rawNode = await this.backend.readNode(resolvedPath, slot);
-
-      // Check if section exists (EC-11)
-      const sectionContent = rawNode.sections[sectionId];
-      if (sectionContent === undefined) {
-        throw new SectionNotFoundError(
-          `${path}/${sectionId}`,
-          `Section '${sectionId}' not found in node`
-        );
-      }
-
-      // Parse existing content
-      const existingContent: unknown =
-        typeof sectionContent === 'string'
-          ? JSON.parse(sectionContent)
-          : sectionContent;
-
-      // Validate existing content is array
-      if (!Array.isArray(existingContent)) {
-        throw new ValidationError(
-          `${path}/${sectionId}`,
-          `Section content is not an array`
-        );
-      }
-
-      // Find item index
-      const itemIndex = existingContent.findIndex(
-        (i: unknown) =>
-          typeof i === 'object' &&
-          i !== null &&
-          (i as { id?: string }).id === itemId
-      );
-
-      if (itemIndex === -1) {
-        throw new NotFoundError(
-          `${path}/${sectionId}/${itemId}`,
-          `Item '${itemId}' not found in section`
-        );
-      }
-
-      // Remove item
-      const newContent = existingContent.filter(
-        (i: unknown) =>
-          typeof i === 'object' &&
-          i !== null &&
-          (i as { id?: string }).id !== itemId
-      );
-
-      // Serialize content
-      const serializedContent = JSON.stringify(newContent);
-
-      // Update node
-      const updatedNode: RawNode = {
-        metadata: rawNode.metadata,
-        sections: {
-          ...rawNode.sections,
-          [sectionId]: serializedContent,
-        },
-      };
-
-      // Write updated node
-      await this.backend.writeNode(resolvedPath, slot, updatedNode);
-
-      return {
-        ok: true,
-        path: `${path}/${sectionId}/${itemId}`,
-      };
-    },
-  };
-
-  /**
    * Describe a node's schema structure
    * IR-23: describe(schemaOrPath)
    * Returns natural language description for LLM consumption
@@ -2058,45 +1115,11 @@ class StoreImpl implements Store, ControlPlane {
     // Check if it's a path (contains /) or a schema ID
     if (schemaOrPath.includes('/')) {
       // It's a path - resolve to schema
-      const parts = schemaOrPath.split('/').filter((p) => p.length > 0);
-
-      if (parts.length < 2) {
-        throw new NotFoundError(
-          schemaOrPath,
-          `Invalid node path: ${schemaOrPath}`
-        );
-      }
-
-      const group = parts[0];
-      const slot = parts[1];
-
-      if (group === undefined || slot === undefined) {
-        throw new NotFoundError(
-          schemaOrPath,
-          `Invalid node path: ${schemaOrPath}`
-        );
-      }
-
-      if (!isValidGroupAddress(group)) {
-        throw new NotFoundError(
-          schemaOrPath,
-          `Invalid group address: ${group}`
-        );
-      }
-
-      const resolvedPath = await this.resolveGroupPath(group);
-
-      // Check if node exists
-      const nodeExists = await this.backend.exists(resolvedPath, slot);
-      if (!nodeExists) {
-        throw new NotFoundError(
-          schemaOrPath,
-          `Node not found: ${schemaOrPath}`
-        );
-      }
-
-      // Read node to get schema-id
-      const rawNode = await this.backend.readNode(resolvedPath, slot);
+      const { rawNode } = await resolveNodePath(
+        schemaOrPath,
+        this.backend,
+        this.resolveGroupPath.bind(this)
+      );
       const nodeSchemaId = rawNode.metadata['schema-id'];
 
       if (typeof nodeSchemaId !== 'string') {
@@ -2157,33 +1180,11 @@ class StoreImpl implements Store, ControlPlane {
       schema?: string;
     }[];
   }> {
-    const parts = path.split('/').filter((p) => p.length > 0);
-
-    if (parts.length < 2) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    const group = parts[0];
-    const slot = parts[1];
-
-    if (group === undefined || slot === undefined) {
-      throw new NotFoundError(path, `Invalid node path: ${path}`);
-    }
-
-    if (!isValidGroupAddress(group)) {
-      throw new NotFoundError(path, `Invalid group address: ${group}`);
-    }
-
-    const resolvedPath = await this.resolveGroupPath(group);
-
-    // Check if node exists
-    const nodeExists = await this.backend.exists(resolvedPath, slot);
-    if (!nodeExists) {
-      throw new NotFoundError(path, `Node not found: ${path}`);
-    }
-
-    // Read node data
-    const rawNode = await this.backend.readNode(resolvedPath, slot);
+    const { rawNode } = await resolveNodePath(
+      path,
+      this.backend,
+      this.resolveGroupPath.bind(this)
+    );
 
     const errors: {
       path: string;
@@ -2488,7 +1489,7 @@ export const Sidechain = {
       backend,
       registry,
       mounts,
-      config.nodeExtension ?? '.md',
+      config.nodeExtension ?? DEFAULT_NODE_EXTENSION,
       tokenSalt
     );
 
