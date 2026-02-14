@@ -196,6 +196,97 @@ describe('Store Initialization', () => {
     const retrievedGroupSchema = await store.getSchema('test-group');
     expect(retrievedGroupSchema).toEqual(groupSchema);
   });
+
+  // rootDir path resolution: relative path with explicit rootDir
+  it('resolves relative mount path with explicit rootDir', async () => {
+    const testRootDir = path.join(tempDir, 'root');
+    const config: SidechainConfig = {
+      rootDir: testRootDir,
+      mounts: {
+        main: {
+          path: './data',
+          groupSchema: 'test-group',
+        },
+      },
+      groupSchemas: {
+        'test-group': {
+          'schema-id': 'test-group',
+          slots: [{ id: 'spec', schema: 'test-node' }],
+        },
+      },
+      nodeSchemas: {
+        'test-node': {
+          'schema-id': 'test-node',
+        },
+      },
+    };
+
+    const store = (await Sidechain.open(config)) as Store & ControlPlane;
+    const mounts = await store.mounts();
+
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]?.path).toBe(path.join(testRootDir, 'data'));
+  });
+
+  // rootDir path resolution: relative path without rootDir defaults to cwd
+  it('resolves relative mount path to cwd when rootDir not specified', async () => {
+    const config: SidechainConfig = {
+      mounts: {
+        main: {
+          path: './data',
+          groupSchema: 'test-group',
+        },
+      },
+      groupSchemas: {
+        'test-group': {
+          'schema-id': 'test-group',
+          slots: [{ id: 'spec', schema: 'test-node' }],
+        },
+      },
+      nodeSchemas: {
+        'test-node': {
+          'schema-id': 'test-node',
+        },
+      },
+    };
+
+    const store = (await Sidechain.open(config)) as Store & ControlPlane;
+    const mounts = await store.mounts();
+
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]?.path).toBe(path.resolve(process.cwd(), './data'));
+  });
+
+  // rootDir path resolution: absolute path ignores rootDir
+  it('preserves absolute mount path regardless of rootDir', async () => {
+    const absolutePath = path.join(tempDir, 'absolute', 'data');
+    const config: SidechainConfig = {
+      rootDir: path.join(tempDir, 'root'),
+      mounts: {
+        main: {
+          path: absolutePath,
+          groupSchema: 'test-group',
+        },
+      },
+      groupSchemas: {
+        'test-group': {
+          'schema-id': 'test-group',
+          slots: [{ id: 'spec', schema: 'test-node' }],
+        },
+      },
+      nodeSchemas: {
+        'test-node': {
+          'schema-id': 'test-node',
+        },
+      },
+    };
+
+    const store = (await Sidechain.open(config)) as Store & ControlPlane;
+    const mounts = await store.mounts();
+
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]?.path).toBe(absolutePath);
+  });
 });
 
 describe('Group Operations', () => {

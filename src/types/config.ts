@@ -18,6 +18,8 @@ export interface MountDef {
  */
 export interface SidechainConfig {
   backend?: Backend;
+  /** Base directory for resolving relative mount paths. Defaults to cwd. */
+  rootDir?: string;
   mounts: Record<string, MountDef>;
   groupSchemas: Record<string, string | GroupSchema>;
   nodeSchemas: Record<string, string | NodeSchema>;

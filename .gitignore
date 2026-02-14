@@ -41,6 +41,9 @@ tmp/
 temp/
 *.tmp
 
+# Test data
+data/
+
 # Example
 example/
 

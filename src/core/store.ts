@@ -5,6 +5,8 @@
  * EC-1, EC-2, EC-10
  */
 
+import * as path from 'node:path';
+
 import { DEFAULT_NODE_EXTENSION } from '../shared/constants.js';
 import type { Backend, RawNode, SlotDef } from '../types/backend.js';
 import type { SidechainConfig } from '../types/config.js';
@@ -1459,12 +1461,13 @@ export const Sidechain = {
       registry.registerSchema(schema);
     }
 
-    // Create mount entries
+    // Create mount entries, resolving relative paths against rootDir
+    const rootDir = config.rootDir ?? process.cwd();
     const mounts: MountEntry[] = [];
     for (const [mountId, mountDef] of Object.entries(config.mounts)) {
       mounts.push({
         id: mountId,
-        path: mountDef.path,
+        path: path.resolve(rootDir, mountDef.path),
         groupSchema: mountDef.groupSchema,
       });
     }

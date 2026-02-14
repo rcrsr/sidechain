@@ -4,6 +4,9 @@
   "description": "Structured persistent content layer for LLM applications",
   "type": "module",
   "main": "dist/core/index.js",
+  "exports": {
+    ".": "./dist/core/index.js"
+  },
   "bin": {
     "sidechain": "./dist/cli/index.js",
     "sidechain-mcp": "./dist/mcp/index.js"
