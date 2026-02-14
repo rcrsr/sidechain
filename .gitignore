@@ -41,6 +41,9 @@ tmp/
 temp/
 *.tmp
 
+# Example
+example/
+
 # Internal
 .internal/
 conduct/
