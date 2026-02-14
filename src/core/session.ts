@@ -209,6 +209,16 @@ export class Session implements Store {
     return this.store.deleteGroup(groupAddress);
   }
 
+  async getGroupMeta(groupAddress: string): Promise<{
+    schema: string;
+    name: string | null;
+    client: string;
+    created: string;
+  }> {
+    this.ensureOpen();
+    return this.store.getGroupMeta(groupAddress);
+  }
+
   async describeGroup(groupAddress: string): Promise<GroupDescription> {
     this.ensureOpen();
     return this.store.describeGroup(groupAddress);

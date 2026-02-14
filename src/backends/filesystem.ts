@@ -23,7 +23,13 @@ import * as path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import { DEFAULT_NODE_EXTENSION } from '../shared/constants.js';
-import type { Backend, GroupEntry, RawNode, SlotDef } from './interface.js';
+import type {
+  Backend,
+  GroupEntry,
+  GroupMeta,
+  RawNode,
+  SlotDef,
+} from './interface.js';
 
 /**
  * Filesystem backend configuration
@@ -44,14 +50,19 @@ export class FilesystemBackend implements Backend {
 
   /**
    * Create a new group directory with slot files
-   * IR-25: createGroup(resolvedPath, slots)
+   * IR-1: createGroup(resolvedPath, slots, meta)
    *
    * Creates directory at resolvedPath
    * For each slot in slots[], creates file {resolvedPath}/{slot.id}{extension}
    * Writes default frontmatter: ---\nschema-id: {slot.schema}\n---\n
    * No sections by default (empty file after frontmatter)
+   * After slot file loop, writes _meta.json with group metadata
    */
-  async createGroup(resolvedPath: string, slots: SlotDef[]): Promise<void> {
+  async createGroup(
+    resolvedPath: string,
+    slots: SlotDef[],
+    meta: GroupMeta
+  ): Promise<void> {
     // Create directory
     await fs.mkdir(resolvedPath, { recursive: true });
 
@@ -61,6 +72,60 @@ export class FilesystemBackend implements Backend {
       const metadata = { 'schema-id': slot.schema };
       const content = this.serializeNode({ metadata, sections: {} });
       await fs.writeFile(filePath, content, 'utf-8');
+    }
+
+    // Write _meta.json
+    const metaPath = path.join(resolvedPath, '_meta.json');
+    await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+  }
+
+  /**
+   * Read group metadata from _meta.json
+   * IR-2: readGroupMeta(resolvedPath)
+   *
+   * Reads and parses _meta.json from group directory
+   * EC-1: If _meta.json is missing or malformed, infers schema from first slot file
+   * and returns default metadata with inferred schema, name: null, client: "unknown", created: ""
+   */
+  async readGroupMeta(resolvedPath: string): Promise<GroupMeta> {
+    const metaPath = path.join(resolvedPath, '_meta.json');
+
+    try {
+      const content = await fs.readFile(metaPath, 'utf-8');
+      const parsed = JSON.parse(content) as GroupMeta;
+      return parsed;
+    } catch {
+      // _meta.json missing or malformed - infer schema from first slot file
+      // EC-1: Return default metadata with inferred schema
+      try {
+        const groupFiles = await fs.readdir(resolvedPath);
+        const firstSlotFile = groupFiles.find((f) =>
+          f.endsWith(this.extension)
+        );
+
+        if (firstSlotFile !== undefined) {
+          const slotPath = path.join(resolvedPath, firstSlotFile);
+          const node = await this.readNodeFromFile(slotPath);
+          const schemaId = node.metadata['schema-id'];
+
+          return {
+            schema: typeof schemaId === 'string' ? schemaId : '',
+            name: null,
+            client: 'unknown',
+            created: '',
+          };
+        }
+      } catch {
+        // Fall through to error case
+      }
+
+      // No slot files found - return empty default
+      return {
+        schema: '',
+        name: null,
+        client: 'unknown',
+        created: '',
+      };
     }
   }
 

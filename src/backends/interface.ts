@@ -19,6 +19,7 @@
 export type {
   Backend,
   GroupEntry,
+  GroupMeta,
   RawNode,
   SlotDef,
 } from '../types/backend.js';

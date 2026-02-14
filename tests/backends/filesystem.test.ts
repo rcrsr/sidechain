@@ -10,11 +10,22 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { FilesystemBackend } from '../../src/backends/filesystem.js';
-import type { RawNode, SlotDef } from '../../src/backends/interface.js';
+import type {
+  GroupMeta,
+  RawNode,
+  SlotDef,
+} from '../../src/backends/interface.js';
 
 describe('FilesystemBackend', () => {
   let backend: FilesystemBackend;
   let tempDir: string;
+
+  const defaultMeta: GroupMeta = {
+    schema: 'test-schema',
+    name: 'test-group',
+    client: 'test-client',
+    created: '2026-02-14T00:00:00.000Z',
+  };
 
   beforeEach(async () => {
     backend = new FilesystemBackend({ nodeExtension: '.md' });
@@ -34,7 +45,7 @@ describe('FilesystemBackend', () => {
         { id: 'plan', schema: 'initiative-plan' },
       ];
 
-      await backend.createGroup(groupPath, slots);
+      await backend.createGroup(groupPath, slots, defaultMeta);
 
       const stat = await fs.stat(groupPath);
       expect(stat.isDirectory()).toBe(true);
@@ -48,7 +59,7 @@ describe('FilesystemBackend', () => {
         { id: 'plan', schema: 'initiative-plan' },
       ];
 
-      await backend.createGroup(groupPath, slots);
+      await backend.createGroup(groupPath, slots, defaultMeta);
 
       // Check spec slot
       const specContent = await fs.readFile(
@@ -72,7 +83,7 @@ describe('FilesystemBackend', () => {
       const groupPath = path.join(tempDir, 'test-group');
       const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
 
-      await backend.createGroup(groupPath, slots);
+      await backend.createGroup(groupPath, slots, defaultMeta);
 
       const content = await fs.readFile(
         path.join(groupPath, 'spec.md'),
@@ -97,13 +108,223 @@ describe('FilesystemBackend', () => {
         { id: 'requirements', schema: 'requirements-doc' },
       ];
 
-      await backend.createGroup(groupPath, slots);
+      await backend.createGroup(groupPath, slots, defaultMeta);
 
       const files = await fs.readdir(groupPath);
-      expect(files).toHaveLength(3);
+      expect(files).toHaveLength(4); // 3 slots + _meta.json
       expect(files).toContain('spec.md');
       expect(files).toContain('plan.md');
       expect(files).toContain('requirements.md');
+      expect(files).toContain('_meta.json');
+    });
+
+    // IR-1: createGroup writes _meta.json
+    it('writes _meta.json file in group directory', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: 'Test Initiative',
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+
+      const metaPath = path.join(groupPath, '_meta.json');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+      const parsed = JSON.parse(metaContent) as GroupMeta;
+
+      expect(parsed.schema).toBe('initiative-spec');
+      expect(parsed.name).toBe('Test Initiative');
+      expect(parsed.client).toBe('test-client');
+      expect(parsed.created).toBe('2026-02-14T10:00:00.000Z');
+    });
+
+    // IR-1: _meta.json formatted with 2-space indent
+    it('formats _meta.json with 2-space indentation', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: 'Test Initiative',
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+
+      const metaPath = path.join(groupPath, '_meta.json');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+
+      // Check for 2-space indentation
+      expect(metaContent).toContain('{\n  "schema"');
+      expect(metaContent).toContain(',\n  "name"');
+    });
+
+    // IR-1: _meta.json with null name
+    it('handles null name in metadata', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: null,
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+
+      const metaPath = path.join(groupPath, '_meta.json');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+      const parsed = JSON.parse(metaContent) as GroupMeta;
+
+      expect(parsed.name).toBeNull();
+    });
+  });
+
+  describe('readGroupMeta', () => {
+    // IR-2: readGroupMeta reads and parses _meta.json
+    it('reads and parses valid _meta.json', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: 'Test Initiative',
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.schema).toBe('initiative-spec');
+      expect(retrieved.name).toBe('Test Initiative');
+      expect(retrieved.client).toBe('test-client');
+      expect(retrieved.created).toBe('2026-02-14T10:00:00.000Z');
+    });
+
+    // EC-1, AC-20: _meta.json missing - infer schema from first slot
+    it('returns default metadata when _meta.json is missing', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      await fs.mkdir(groupPath, { recursive: true });
+
+      // Manually create slot file without _meta.json
+      const content = `---
+schema-id: initiative-spec
+---
+
+`;
+      await fs.writeFile(path.join(groupPath, 'spec.md'), content, 'utf-8');
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.schema).toBe('initiative-spec');
+      expect(retrieved.name).toBeNull();
+      expect(retrieved.client).toBe('unknown');
+      expect(retrieved.created).toBe('');
+    });
+
+    // EC-1, AC-21: Infer schema from first slot file
+    it('infers schema from first slot file when metadata missing', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      await fs.mkdir(groupPath, { recursive: true });
+
+      // Create multiple slot files
+      await fs.writeFile(
+        path.join(groupPath, 'spec.md'),
+        '---\nschema-id: initiative-spec\n---\n',
+        'utf-8'
+      );
+      await fs.writeFile(
+        path.join(groupPath, 'plan.md'),
+        '---\nschema-id: initiative-plan\n---\n',
+        'utf-8'
+      );
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      // Should read from first slot file (alphabetically)
+      expect(retrieved.schema).toBe('initiative-plan');
+      expect(retrieved.name).toBeNull();
+      expect(retrieved.client).toBe('unknown');
+      expect(retrieved.created).toBe('');
+    });
+
+    // EC-1: _meta.json malformed JSON
+    it('returns default metadata when _meta.json has malformed JSON', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      await fs.mkdir(groupPath, { recursive: true });
+
+      // Write malformed JSON
+      await fs.writeFile(
+        path.join(groupPath, '_meta.json'),
+        '{ invalid json',
+        'utf-8'
+      );
+
+      // Create slot file for schema inference
+      await fs.writeFile(
+        path.join(groupPath, 'spec.md'),
+        '---\nschema-id: initiative-spec\n---\n',
+        'utf-8'
+      );
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.schema).toBe('initiative-spec');
+      expect(retrieved.name).toBeNull();
+      expect(retrieved.client).toBe('unknown');
+      expect(retrieved.created).toBe('');
+    });
+
+    // EC-1: No slot files and no _meta.json
+    it('returns empty default when no metadata and no slots', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      await fs.mkdir(groupPath, { recursive: true });
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.schema).toBe('');
+      expect(retrieved.name).toBeNull();
+      expect(retrieved.client).toBe('unknown');
+      expect(retrieved.created).toBe('');
+    });
+
+    // IR-2: Handles null name in _meta.json
+    it('preserves null name from _meta.json', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: null,
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.name).toBeNull();
+    });
+
+    // AC-23: Round-trip _meta.json preserves all fields
+    it('preserves metadata through write-read round trip', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: 'Test Initiative',
+        client: 'test-client',
+        created: '2026-02-14T10:00:00.000Z',
+      };
+
+      await backend.createGroup(groupPath, slots, meta);
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved).toEqual(meta);
     });
   });
 
@@ -116,7 +337,7 @@ describe('FilesystemBackend', () => {
         { id: 'plan', schema: 'initiative-plan' },
       ];
 
-      await backend.createGroup(groupPath, slots);
+      await backend.createGroup(groupPath, slots, defaultMeta);
 
       // Verify it exists
       let exists = await backend.exists(groupPath);
@@ -144,15 +365,21 @@ describe('FilesystemBackend', () => {
       const mountPath = tempDir;
 
       // Create multiple groups
-      await backend.createGroup(path.join(mountPath, 'group-1'), [
-        { id: 'spec', schema: 'schema-a' },
-      ]);
-      await backend.createGroup(path.join(mountPath, 'group-2'), [
-        { id: 'spec', schema: 'schema-b' },
-      ]);
-      await backend.createGroup(path.join(mountPath, 'group-3'), [
-        { id: 'spec', schema: 'schema-c' },
-      ]);
+      await backend.createGroup(
+        path.join(mountPath, 'group-1'),
+        [{ id: 'spec', schema: 'schema-a' }],
+        { ...defaultMeta, schema: 'schema-a' }
+      );
+      await backend.createGroup(
+        path.join(mountPath, 'group-2'),
+        [{ id: 'spec', schema: 'schema-b' }],
+        { ...defaultMeta, schema: 'schema-b' }
+      );
+      await backend.createGroup(
+        path.join(mountPath, 'group-3'),
+        [{ id: 'spec', schema: 'schema-c' }],
+        { ...defaultMeta, schema: 'schema-c' }
+      );
 
       const groups = await backend.listGroups(mountPath);
 
@@ -166,9 +393,11 @@ describe('FilesystemBackend', () => {
     it('returns schema from first slot file', async () => {
       const mountPath = tempDir;
 
-      await backend.createGroup(path.join(mountPath, 'test-group'), [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        path.join(mountPath, 'test-group'),
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        { ...defaultMeta, schema: 'initiative-spec' }
+      );
 
       const groups = await backend.listGroups(mountPath);
 
@@ -201,9 +430,11 @@ describe('FilesystemBackend', () => {
     // IR-28: readNode parses YAML frontmatter
     it('parses YAML frontmatter into metadata', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       // Manually write node with custom metadata
       const content = `---
@@ -225,9 +456,11 @@ priority: high
     // IR-28: readNode parses ## sections
     it('parses h2 sections into sections array', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       // Manually write node with sections
       const content = `---
@@ -272,9 +505,11 @@ Design details here.
     // IR-28: Section ID slugification
     it('converts heading text to slugified section IDs', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const content = `---
 schema-id: initiative-spec
@@ -305,9 +540,11 @@ Details.
     // IR-28: Empty sections allowed
     it('handles empty sections', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const content = `---
 schema-id: initiative-spec
@@ -330,9 +567,11 @@ Some content.
     // IR-28: No sections returns empty sections array
     it('returns empty sections array when no sections present', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const node = await backend.readNode(groupPath, 'spec');
 
@@ -344,9 +583,11 @@ Some content.
     // IR-29: writeNode serializes frontmatter + sections
     it('serializes metadata as YAML frontmatter', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const node: RawNode = {
         metadata: {
@@ -373,9 +614,11 @@ Some content.
     // IR-29: writeNode serializes sections as ## blocks
     it('serializes sections as h2 markdown blocks', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const node: RawNode = {
         metadata: { 'schema-id': 'initiative-spec' },
@@ -401,9 +644,11 @@ Some content.
     // AC-32: Round-trip produces identical RawNode
     it('preserves data through write-read round trip', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const original: RawNode = {
         metadata: {
@@ -435,9 +680,11 @@ Some content.
     // IR-29: Complex metadata types
     it('handles complex metadata types', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const node: RawNode = {
         metadata: {
@@ -464,9 +711,11 @@ Some content.
     // IR-30: exists returns true for existing group
     it('returns true for existing group directory', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const exists = await backend.exists(groupPath);
 
@@ -485,9 +734,11 @@ Some content.
     // IR-30: exists returns true for existing slot
     it('returns true for existing node slot', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const exists = await backend.exists(groupPath, 'spec');
 
@@ -497,9 +748,11 @@ Some content.
     // IR-30: exists returns false for missing slot
     it('returns false for non-existent node slot', async () => {
       const groupPath = path.join(tempDir, 'test-group');
-      await backend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await backend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const exists = await backend.exists(groupPath, 'nonexistent');
 
@@ -513,9 +766,11 @@ Some content.
       const customBackend = new FilesystemBackend({ nodeExtension: '.txt' });
       const groupPath = path.join(tempDir, 'test-group');
 
-      await customBackend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await customBackend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const files = await fs.readdir(groupPath);
       expect(files).toContain('spec.txt');
@@ -527,9 +782,11 @@ Some content.
       const defaultBackend = new FilesystemBackend();
       const groupPath = path.join(tempDir, 'test-group');
 
-      await defaultBackend.createGroup(groupPath, [
-        { id: 'spec', schema: 'initiative-spec' },
-      ]);
+      await defaultBackend.createGroup(
+        groupPath,
+        [{ id: 'spec', schema: 'initiative-spec' }],
+        defaultMeta
+      );
 
       const files = await fs.readdir(groupPath);
       expect(files).toContain('spec.md');

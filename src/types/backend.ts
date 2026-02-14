@@ -30,13 +30,35 @@ export interface RawNode {
 }
 
 /**
+ * Group metadata stored in manifest file
+ * Required for group creation (§CORE.1.1)
+ */
+export interface GroupMeta {
+  schema: string;
+  name: string | null;
+  client: string;
+  created: string;
+}
+
+/**
  * Backend interface implemented by all storage backends
  */
 export interface Backend {
   /**
    * Create a new group directory with slot definitions
+   * IR-1: createGroup gains required meta parameter (§CORE.1.1)
    */
-  createGroup(resolvedPath: string, slots: SlotDef[]): Promise<void>;
+  createGroup(
+    resolvedPath: string,
+    slots: SlotDef[],
+    meta: GroupMeta
+  ): Promise<void>;
+
+  /**
+   * Read group metadata from manifest file
+   * IR-2: readGroupMeta reads group manifest
+   */
+  readGroupMeta(resolvedPath: string): Promise<GroupMeta>;
 
   /**
    * Delete a group and all its contents

@@ -403,6 +403,94 @@ describe('Group Operations', () => {
     it('throws INVALID_SCHEMA when schema not registered', async () => {
       await expect(store.createGroup('nonexistent-schema')).rejects.toThrow();
     });
+
+    // EC-3: Invalid schema with client opts throws error
+    it('throws error when invalid schema provided with client opts (EC-3)', async () => {
+      await expect(
+        store.createGroup('invalid-schema', { client: 'app1' })
+      ).rejects.toThrow();
+    });
+
+    // AC-17: createGroup without client in opts raises InvalidSchemaError
+    it('throws INVALID_SCHEMA when opts provided without client (EC-2, AC-17)', async () => {
+      await expect(
+        store.createGroup('test-group', { client: '', name: 'test' })
+      ).rejects.toThrow(InvalidSchemaError);
+      await expect(
+        store.createGroup('test-group', { client: '', name: 'test' })
+      ).rejects.toThrow(/missing required field 'client'/i);
+    });
+
+    // EC-2: createGroup with whitespace-only client raises InvalidSchemaError
+    it('throws INVALID_SCHEMA when opts.client is whitespace-only', async () => {
+      await expect(
+        store.createGroup('test-group', { client: '   ', name: 'test' })
+      ).rejects.toThrow(InvalidSchemaError);
+      await expect(
+        store.createGroup('test-group', { client: '   ', name: 'test' })
+      ).rejects.toThrow(/missing required field 'client'/i);
+    });
+
+    // AC-18: createGroup with client in opts includes client ID in metadata
+    it('creates group with client metadata when opts.client provided (IR-3, AC-18)', async () => {
+      const result = await store.createGroup('test-group', {
+        client: 'test-client-123',
+        name: 'My Test Group',
+      });
+
+      expect(result).toHaveProperty('address');
+      expect(result).toHaveProperty('schema');
+      expect(result.schema).toBe('test-group');
+
+      // Verify backend metadata by reading _meta.json directly
+      const fs = await import('node:fs/promises');
+      const metaPath = path.join(setup.groupsDir, result.address, '_meta.json');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+      const meta = JSON.parse(metaContent) as {
+        schema: string;
+        name: string | null;
+        client: string;
+        created: string;
+      };
+
+      expect(meta.client).toBe('test-client-123');
+      expect(meta.name).toBe('My Test Group');
+      expect(meta.schema).toBe('test-group');
+      expect(meta.created).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    });
+
+    // IR-3: createGroup passes GroupMeta to backend with correct structure
+    it('works without opts parameter (backward compatibility)', async () => {
+      const result = await store.createGroup('test-group');
+
+      expect(result).toHaveProperty('address');
+      expect(result.address).toMatch(/^sc_g_[a-f0-9]+$/);
+
+      // Verify backend metadata defaults client to "unknown"
+      const fs = await import('node:fs/promises');
+      const metaPath = path.join(setup.groupsDir, result.address, '_meta.json');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+      const meta = JSON.parse(metaContent) as {
+        schema: string;
+        name: string | null;
+        client: string;
+        created: string;
+      };
+
+      expect(meta.client).toBe('unknown');
+      expect(meta.name).toBe(null);
+      expect(meta.schema).toBe('test-group');
+    });
+
+    // IR-3: createGroup with only client (name optional)
+    it('creates group with client but no name', async () => {
+      const result = await store.createGroup('test-group', {
+        client: 'client-only',
+      });
+
+      expect(result).toHaveProperty('address');
+      expect(result.schema).toBe('test-group');
+    });
   });
 
   describe('deleteGroup', () => {

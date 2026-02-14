@@ -103,12 +103,25 @@ export interface Store {
    * Create a new group with the specified schema
    * Returns the cryptographic address and schema ID
    */
-  createGroup(schemaId: string): Promise<GroupResult>;
+  createGroup(
+    schemaId: string,
+    opts?: { client: string; name?: string }
+  ): Promise<GroupResult>;
 
   /**
    * Delete a group and all its contents
    */
   deleteGroup(groupAddress: string): Promise<Result<void>>;
+
+  /**
+   * Get group metadata (_meta.json)
+   */
+  getGroupMeta(groupAddress: string): Promise<{
+    schema: string;
+    name: string | null;
+    client: string;
+    created: string;
+  }>;
 
   /**
    * Describe a group's structure (schema and slots)

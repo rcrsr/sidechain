@@ -10,7 +10,11 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Client } from '../../src/core/client.js';
-import { StaleTokenError } from '../../src/core/errors.js';
+import {
+  MappingError,
+  NameNotFoundError,
+  StaleTokenError,
+} from '../../src/core/errors.js';
 import type { SidechainConfig } from '../../src/types/config.js';
 import type { GroupSchema, NodeSchema } from '../../src/types/schema.js';
 import type { Store } from '../../src/types/store.js';
@@ -73,7 +77,11 @@ describe('Store-Client Integration', () => {
     });
     store = setup.store;
     mappingPath = path.join(setup.tempDir, 'mappings.json');
-    client = new Client(mappingPath);
+    client = new Client({
+      clientId: 'integration-client',
+      mappingPath,
+      store,
+    });
   });
 
   afterEach(async () => {
@@ -694,15 +702,19 @@ describe('Store-Client Integration', () => {
       const { address } = await store.createGroup('test-group');
 
       // Client 1 maps to "user-auth"
-      const client1 = new Client(
-        path.join(setup.tempDir, 'client1-mappings.json')
-      );
+      const client1 = new Client({
+        clientId: 'client-1',
+        mappingPath: path.join(setup.tempDir, 'client1-mappings.json'),
+        store,
+      });
       client1.saveMapping('user-auth', address);
 
       // Client 2 maps same address to "authentication"
-      const client2 = new Client(
-        path.join(setup.tempDir, 'client2-mappings.json')
-      );
+      const client2 = new Client({
+        clientId: 'client-2',
+        mappingPath: path.join(setup.tempDir, 'client2-mappings.json'),
+        store,
+      });
       client2.saveMapping('authentication', address);
 
       // Both resolve to same address
@@ -782,6 +794,737 @@ describe('Store-Client Integration', () => {
       await expect(
         store.setMeta(nodePath, 'status', 'draft', { token: staleToken })
       ).rejects.toThrow(StaleTokenError);
+    });
+  });
+
+  // client.createGroup tests
+  describe('client.createGroup', () => {
+    // AC-1: Create named group returns { address, schema, name }
+    it('creates named group and returns address, schema, and name', async () => {
+      const result = await client.createGroup('test-group', {
+        name: 'user-auth',
+      });
+
+      // Verify result structure
+      expect(result).toHaveProperty('address');
+      expect(result).toHaveProperty('schema');
+      expect(result).toHaveProperty('name');
+
+      // Verify values
+      expect(result.address).toMatch(/^sc_g_/);
+      expect(result.schema).toBe('test-group');
+      expect(result.name).toBe('user-auth');
+
+      // Verify mapping was saved
+      const resolvedAddress = client.resolveAddress('user-auth');
+      expect(resolvedAddress).toBe(result.address);
+    });
+
+    // AC-2: Create unnamed group returns { address, schema }
+    it('creates unnamed group and returns address and schema without name', async () => {
+      const result = await client.createGroup('test-group');
+
+      // Verify result structure
+      expect(result).toHaveProperty('address');
+      expect(result).toHaveProperty('schema');
+      expect(result).not.toHaveProperty('name');
+
+      // Verify values
+      expect(result.address).toMatch(/^sc_g_/);
+      expect(result.schema).toBe('test-group');
+
+      // Verify no mapping was created
+      expect(() => client.resolveAddress('unnamed-group')).toThrow();
+    });
+
+    // AC-3, EC-4: Duplicate name raises MappingError
+    it('raises MappingError when creating group with duplicate name', async () => {
+      // Create first group with name
+      const first = await client.createGroup('test-group', {
+        name: 'payment',
+      });
+
+      expect(first.name).toBe('payment');
+
+      // Attempt to create second group with same name
+      await expect(
+        client.createGroup('test-group', { name: 'payment' })
+      ).rejects.toThrow(MappingError);
+
+      // Verify original mapping unchanged
+      const resolvedAddress = client.resolveAddress('payment');
+      expect(resolvedAddress).toBe(first.address);
+    });
+
+    // AC-4: Name persists in _meta.json after mapping deletion, recoverable via rebuild
+    it('persists name in _meta.json and recovers after mapping file deletion', async () => {
+      // Create named group
+      const result = await client.createGroup('test-group', {
+        name: 'user-auth',
+      });
+
+      // Verify mapping works
+      expect(client.resolveAddress('user-auth')).toBe(result.address);
+
+      // Read _meta.json to verify name persisted
+      const meta = await store.getGroupMeta(result.address);
+      expect(meta.name).toBe('user-auth');
+
+      // Delete mapping file
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // Verify mapping is gone
+      expect(() => client.resolveAddress('user-auth')).toThrow();
+
+      // Rebuild from _meta.json
+      const rebuildResult = await client.rebuildMappings();
+
+      expect(rebuildResult.recovered).toBe(1);
+
+      // Verify mapping restored
+      expect(client.resolveAddress('user-auth')).toBe(result.address);
+    });
+
+    it('creates multiple named groups successfully', async () => {
+      const group1 = await client.createGroup('test-group', {
+        name: 'auth',
+      });
+      const group2 = await client.createGroup('test-group', {
+        name: 'billing',
+      });
+      const group3 = await client.createGroup('test-group', {
+        name: 'analytics',
+      });
+
+      // Verify all groups created with unique addresses
+      expect(group1.address).toMatch(/^sc_g_/);
+      expect(group2.address).toMatch(/^sc_g_/);
+      expect(group3.address).toMatch(/^sc_g_/);
+      expect(group1.address).not.toBe(group2.address);
+      expect(group2.address).not.toBe(group3.address);
+
+      // Verify all mappings work
+      expect(client.resolveAddress('auth')).toBe(group1.address);
+      expect(client.resolveAddress('billing')).toBe(group2.address);
+      expect(client.resolveAddress('analytics')).toBe(group3.address);
+    });
+
+    it('allows same name to be reused after mapping is idempotent', async () => {
+      // Create group with name
+      const first = await client.createGroup('test-group', { name: 'test' });
+
+      // Calling saveMapping again with same name and address is idempotent
+      client.saveMapping('test', first.address);
+
+      // Verify mapping unchanged
+      expect(client.resolveAddress('test')).toBe(first.address);
+    });
+
+    it('creates both named and unnamed groups successfully', async () => {
+      const named = await client.createGroup('test-group', {
+        name: 'named-group',
+      });
+      const unnamed = await client.createGroup('test-group');
+
+      // Verify named group has name property
+      expect(named.name).toBe('named-group');
+
+      // Verify unnamed group does not have name property
+      expect(unnamed).not.toHaveProperty('name');
+
+      // Verify named group is resolvable
+      expect(client.resolveAddress('named-group')).toBe(named.address);
+
+      // Verify both groups exist in store
+      const namedNode = await store.get(`${named.address}/requirements`);
+      const unnamedNode = await store.get(`${unnamed.address}/requirements`);
+
+      expect(namedNode.metadata['schema-id']).toBe('test-node');
+      expect(unnamedNode.metadata['schema-id']).toBe('test-node');
+    });
+  });
+
+  // client.get with name resolution and address passthrough
+  describe('client.get', () => {
+    it('resolves name and returns node data (AC-5)', async () => {
+      // Create group with name
+      const group = await client.createGroup('test-group', {
+        name: 'hello-world',
+      });
+
+      // Populate sections
+      await store.populate(`${group.address}/requirements`, {
+        sections: {
+          overview: 'Test overview content',
+          details: 'Test details content',
+        },
+      });
+
+      // Get by name - should resolve and return data
+      const result = await client.get('hello-world/requirements');
+
+      expect(result.metadata['schema-id']).toBe('test-node');
+      expect(result.sections).toHaveLength(2); // overview and details
+      const overviewSection = result.sections.find((s) => s.id === 'overview');
+      expect(overviewSection).toBeDefined();
+      expect(overviewSection?.content).toBe('Test overview content');
+    });
+
+    it('accepts address directly and returns data (AC-6)', async () => {
+      // Create group
+      const group = await client.createGroup('test-group', {
+        name: 'test-name',
+      });
+
+      // Populate sections
+      await store.populate(`${group.address}/plan`, {
+        sections: {
+          overview: 'Plan overview',
+          details: 'Plan details here',
+        },
+      });
+
+      // Get by address directly (sc_g_ prefix)
+      const result = await client.get(`${group.address}/plan`);
+
+      expect(result.metadata['schema-id']).toBe('test-node');
+      const detailsSection = result.sections.find((s) => s.id === 'details');
+      expect(detailsSection).toBeDefined();
+      expect(detailsSection?.content).toBe('Plan details here');
+    });
+
+    it('raises NameNotFoundError for unregistered name (AC-7, EC-5)', async () => {
+      // Attempt to get with name that doesn't exist in mappings
+      await expect(client.get('nonexistent/requirements')).rejects.toThrow(
+        NameNotFoundError
+      );
+      await expect(client.get('nonexistent/requirements')).rejects.toThrow(
+        'Name nonexistent not found in mappings'
+      );
+    });
+
+    it('address passthrough works regardless of mapping state (AC-24)', async () => {
+      // Create group with name
+      const group = await client.createGroup('test-group', {
+        name: 'mapped-group',
+      });
+
+      // Populate sections
+      await store.populate(`${group.address}/requirements`, {
+        sections: {
+          overview: 'Content via address',
+          details: 'More content',
+        },
+      });
+
+      // Get by address should work even though mapping exists
+      const resultByAddress = await client.get(`${group.address}/requirements`);
+      expect(resultByAddress.metadata['schema-id']).toBe('test-node');
+      const section = resultByAddress.sections.find((s) => s.id === 'overview');
+      expect(section?.content).toBe('Content via address');
+
+      // Delete the mapping file to test passthrough works without mappings
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // Get by address should still work (passthrough ignores mapping state)
+      const resultAfterDelete = await client.get(
+        `${group.address}/requirements`
+      );
+      expect(resultAfterDelete.metadata['schema-id']).toBe('test-node');
+      const sectionAfter = resultAfterDelete.sections.find(
+        (s) => s.id === 'overview'
+      );
+      expect(sectionAfter?.content).toBe('Content via address');
+
+      // Get by name should fail (mapping no longer exists)
+      await expect(client.get('mapped-group/requirements')).rejects.toThrow(
+        NameNotFoundError
+      );
+    });
+
+    it('handles multiple slots with name resolution', async () => {
+      // Create group
+      const group = await client.createGroup('test-group', {
+        name: 'multi-slot',
+      });
+
+      // Populate both slots
+      await store.populate(`${group.address}/requirements`, {
+        sections: {
+          overview: 'Requirements overview',
+          details: 'Requirements details',
+        },
+      });
+
+      await store.populate(`${group.address}/plan`, {
+        sections: {
+          overview: 'Plan overview',
+          details: 'Plan details',
+        },
+      });
+
+      // Get both slots by name
+      const requirements = await client.get('multi-slot/requirements');
+      const plan = await client.get('multi-slot/plan');
+
+      expect(requirements.metadata['schema-id']).toBe('test-node');
+      expect(plan.metadata['schema-id']).toBe('test-node');
+
+      const reqSection = requirements.sections.find((s) => s.id === 'overview');
+      const planSection = plan.sections.find((s) => s.id === 'details');
+
+      expect(reqSection?.content).toBe('Requirements overview');
+      expect(planSection?.content).toBe('Plan details');
+    });
+
+    it('validates path format requires slot', async () => {
+      // Create group
+      const group = await client.createGroup('test-group', {
+        name: 'test-group-name',
+      });
+
+      // Attempt to get with only group name (no slot)
+      await expect(client.get('test-group-name')).rejects.toThrow(
+        'Path must include slot: group/slot'
+      );
+
+      // Attempt to get with only address (no slot)
+      await expect(client.get(group.address)).rejects.toThrow(
+        'Path must include slot: group/slot'
+      );
+    });
+  });
+
+  // client.list filtering, empty states, and multi-client isolation
+  describe('client.list', () => {
+    // AC-8, AC-19: List returns array with name, address, schema, client
+    it('returns array with name, address, schema, and client fields', async () => {
+      // Create named groups
+      const group1 = await client.createGroup('test-group', {
+        name: 'user-auth',
+      });
+      const group2 = await client.createGroup('test-group', {
+        name: 'payment',
+      });
+
+      // Call client.list
+      const results = await client.list();
+
+      // Verify result structure
+      expect(results).toHaveLength(2);
+
+      // Verify each result has required fields
+      const userAuth = results.find((r) => r.name === 'user-auth');
+      expect(userAuth).toBeDefined();
+      expect(userAuth?.address).toBe(group1.address);
+      expect(userAuth?.schema).toBe('test-group');
+      expect(userAuth?.client).toBe('integration-client');
+
+      const payment = results.find((r) => r.name === 'payment');
+      expect(payment).toBeDefined();
+      expect(payment?.address).toBe(group2.address);
+      expect(payment?.schema).toBe('test-group');
+      expect(payment?.client).toBe('integration-client');
+    });
+
+    // AC-9: List returns empty array when client has no groups
+    it('returns empty array when client has no groups', async () => {
+      // Client with no mappings created
+      const results = await client.list();
+
+      // Verify empty array
+      expect(results).toEqual([]);
+      expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(0);
+    });
+
+    // AC-10: Multiple clients each see only their own groups
+    it('multiple clients each see only their own groups', async () => {
+      // Client 1 creates groups
+      const client1Group1 = await client.createGroup('test-group', {
+        name: 'client1-auth',
+      });
+      const client1Group2 = await client.createGroup('test-group', {
+        name: 'client1-payment',
+      });
+
+      // Client 2 with different client ID
+      const client2 = new Client({
+        clientId: 'client-2',
+        mappingPath: path.join(setup.tempDir, 'client2-mappings.json'),
+        store,
+      });
+
+      // Client 2 creates groups
+      const client2Group1 = await client2.createGroup('test-group', {
+        name: 'client2-auth',
+      });
+      const client2Group2 = await client2.createGroup('test-group', {
+        name: 'client2-billing',
+      });
+
+      // Client 1 lists - should only see client 1 groups
+      const client1Results = await client.list();
+      expect(client1Results).toHaveLength(2);
+      expect(
+        client1Results.every((r) => r.client === 'integration-client')
+      ).toBe(true);
+      const client1Names = client1Results.map((r) => r.name).sort();
+      expect(client1Names).toEqual(['client1-auth', 'client1-payment']);
+
+      // Client 2 lists - should only see client 2 groups
+      const client2Results = await client2.list();
+      expect(client2Results).toHaveLength(2);
+      expect(client2Results.every((r) => r.client === 'client-2')).toBe(true);
+      const client2Names = client2Results.map((r) => r.name).sort();
+      expect(client2Names).toEqual(['client2-auth', 'client2-billing']);
+
+      // Verify addresses are correct
+      expect(
+        client1Results.find((r) => r.name === 'client1-auth')?.address
+      ).toBe(client1Group1.address);
+      expect(
+        client1Results.find((r) => r.name === 'client1-payment')?.address
+      ).toBe(client1Group2.address);
+      expect(
+        client2Results.find((r) => r.name === 'client2-auth')?.address
+      ).toBe(client2Group1.address);
+      expect(
+        client2Results.find((r) => r.name === 'client2-billing')?.address
+      ).toBe(client2Group2.address);
+    });
+
+    // AC-22: List returns empty array when no groups exist
+    it('returns empty array when no groups exist at all', async () => {
+      // Fresh client with no groups created in the store
+      const freshClient = new Client({
+        clientId: 'fresh-client',
+        mappingPath: path.join(setup.tempDir, 'fresh-mappings.json'),
+        store,
+      });
+
+      // List with no groups in store at all
+      const results = await freshClient.list();
+
+      expect(results).toEqual([]);
+      expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(0);
+    });
+
+    it('handles missing mapping file gracefully', async () => {
+      // Create groups first
+      await client.createGroup('test-group', { name: 'test1' });
+      await client.createGroup('test-group', { name: 'test2' });
+
+      // Verify list works
+      const beforeDelete = await client.list();
+      expect(beforeDelete).toHaveLength(2);
+
+      // Delete mapping file
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // List should return empty array (no mappings)
+      const afterDelete = await client.list();
+      expect(afterDelete).toEqual([]);
+      expect(Array.isArray(afterDelete)).toBe(true);
+      expect(afterDelete).toHaveLength(0);
+    });
+
+    it('skips groups that no longer exist in store', async () => {
+      // Create groups
+      const group1 = await client.createGroup('test-group', {
+        name: 'keep-me',
+      });
+      const group2 = await client.createGroup('test-group', {
+        name: 'delete-me',
+      });
+
+      // Verify both are listed
+      const before = await client.list();
+      expect(before).toHaveLength(2);
+
+      // Delete one group directly from store (bypassing client)
+      await store.deleteGroup(group2.address);
+
+      // List should only return the remaining group
+      const after = await client.list();
+      expect(after).toHaveLength(1);
+      expect(after[0]?.name).toBe('keep-me');
+      expect(after[0]?.address).toBe(group1.address);
+
+      // Mapping still exists for deleted group, but list skips it
+      const mappings = client.loadMappings();
+      expect(mappings['delete-me']).toBeDefined();
+    });
+
+    it('returns correct metadata for all groups', async () => {
+      // Create groups with different names
+      const auth = await client.createGroup('test-group', { name: 'auth' });
+      const billing = await client.createGroup('test-group', {
+        name: 'billing',
+      });
+      const analytics = await client.createGroup('test-group', {
+        name: 'analytics',
+      });
+
+      const results = await client.list();
+
+      // Verify all groups returned
+      expect(results).toHaveLength(3);
+
+      // Verify metadata for each
+      for (const result of results) {
+        expect(result.address).toMatch(/^sc_g_/);
+        expect(result.schema).toBe('test-group');
+        expect(result.client).toBe('integration-client');
+        expect(['auth', 'billing', 'analytics']).toContain(result.name);
+      }
+
+      // Verify addresses match
+      expect(results.find((r) => r.name === 'auth')?.address).toBe(
+        auth.address
+      );
+      expect(results.find((r) => r.name === 'billing')?.address).toBe(
+        billing.address
+      );
+      expect(results.find((r) => r.name === 'analytics')?.address).toBe(
+        analytics.address
+      );
+    });
+  });
+
+  // client.deleteGroup tests
+  describe('client.deleteGroup', () => {
+    // AC-11: Delete by registered name removes group and mapping
+    it('deletes group and removes mapping when given registered name', async () => {
+      // Create named group
+      const group = await client.createGroup('test-group', {
+        name: 'user-auth',
+      });
+
+      // Verify group exists in store
+      const node = await store.get(`${group.address}/requirements`);
+      expect(node.metadata['schema-id']).toBe('test-node');
+
+      // Verify mapping exists
+      expect(client.resolveAddress('user-auth')).toBe(group.address);
+
+      // Delete by name
+      const result = await client.deleteGroup('user-auth');
+
+      expect(result).toEqual({ ok: true });
+
+      // Verify group deleted from store
+      await expect(
+        store.get(`${group.address}/requirements`)
+      ).rejects.toThrow();
+
+      // Verify mapping removed
+      expect(() => client.resolveAddress('user-auth')).toThrow(
+        NameNotFoundError
+      );
+    });
+
+    // AC-12: Delete by valid address removes group
+    it('deletes group when given valid address', async () => {
+      // Create unnamed group (no name mapping)
+      const group = await client.createGroup('test-group');
+
+      // Verify group exists
+      const node = await store.get(`${group.address}/requirements`);
+      expect(node.metadata['schema-id']).toBe('test-node');
+
+      // Delete by address
+      const result = await client.deleteGroup(group.address);
+
+      expect(result).toEqual({ ok: true });
+
+      // Verify group deleted
+      await expect(
+        store.get(`${group.address}/requirements`)
+      ).rejects.toThrow();
+    });
+
+    it('deletes group and removes mapping when given address with existing mapping', async () => {
+      // Create named group
+      const group = await client.createGroup('test-group', { name: 'payment' });
+
+      // Verify mapping exists
+      expect(client.resolveAddress('payment')).toBe(group.address);
+
+      // Delete by address (not by name)
+      const result = await client.deleteGroup(group.address);
+
+      expect(result).toEqual({ ok: true });
+
+      // Verify group deleted
+      await expect(
+        store.get(`${group.address}/requirements`)
+      ).rejects.toThrow();
+
+      // Verify mapping removed
+      expect(() => client.resolveAddress('payment')).toThrow(NameNotFoundError);
+    });
+
+    // AC-13, EC-6: Delete with unregistered name raises NameNotFoundError
+    it('raises NameNotFoundError when deleting with unregistered name', async () => {
+      // Attempt to delete with name that doesn't exist in mappings
+      await expect(client.deleteGroup('nonexistent-name')).rejects.toThrow(
+        NameNotFoundError
+      );
+      await expect(client.deleteGroup('nonexistent-name')).rejects.toThrow(
+        'Name nonexistent-name not found in mappings'
+      );
+    });
+
+    it('deletes one of multiple groups successfully', async () => {
+      // Create multiple groups
+      const group1 = await client.createGroup('test-group', { name: 'auth' });
+      const group2 = await client.createGroup('test-group', {
+        name: 'billing',
+      });
+      const group3 = await client.createGroup('test-group', {
+        name: 'analytics',
+      });
+
+      // Verify all exist
+      const listBefore = await client.list();
+      expect(listBefore).toHaveLength(3);
+
+      // Delete one group
+      await client.deleteGroup('billing');
+
+      // Verify only billing deleted
+      const listAfter = await client.list();
+      expect(listAfter).toHaveLength(2);
+      expect(listAfter.find((g) => g.name === 'auth')).toBeDefined();
+      expect(listAfter.find((g) => g.name === 'analytics')).toBeDefined();
+      expect(listAfter.find((g) => g.name === 'billing')).toBeUndefined();
+
+      // Verify other groups still accessible
+      await expect(client.get('auth/requirements')).resolves.toBeDefined();
+      await expect(client.get('analytics/requirements')).resolves.toBeDefined();
+      await expect(client.get('billing/requirements')).rejects.toThrow();
+    });
+
+    it('handles deletion when mapping file does not exist', async () => {
+      // Create group
+      const group = await client.createGroup('test-group', { name: 'test' });
+
+      // Delete mapping file
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // Delete by address should still work (no mapping to remove)
+      const result = await client.deleteGroup(group.address);
+
+      expect(result).toEqual({ ok: true });
+
+      // Verify group deleted
+      await expect(
+        store.get(`${group.address}/requirements`)
+      ).rejects.toThrow();
+    });
+
+    it('deletes group with populated content', async () => {
+      // Create group with content
+      const group = await client.createGroup('test-group', {
+        name: 'hello-world',
+      });
+
+      await store.populate(`${group.address}/requirements`, {
+        metadata: { status: 'draft' },
+        sections: {
+          overview: 'Test overview content',
+          details: 'Test details content',
+        },
+      });
+
+      // Verify content exists
+      const before = await client.get('hello-world/requirements');
+      expect(before.sections).toHaveLength(2);
+
+      // Delete group
+      const result = await client.deleteGroup('hello-world');
+
+      expect(result).toEqual({ ok: true });
+
+      // Verify group and content deleted
+      await expect(client.get('hello-world/requirements')).rejects.toThrow();
+    });
+
+    it('error code is NAME_NOT_FOUND for unregistered name', async () => {
+      try {
+        await client.deleteGroup('unregistered-name');
+        throw new Error('Should have thrown NameNotFoundError');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NameNotFoundError);
+        expect((error as NameNotFoundError).code).toBe('NAME_NOT_FOUND');
+      }
+    });
+  });
+
+  // rebuildMappings recovery workflow
+  describe('rebuildMappings', () => {
+    it('recovers mappings from _meta.json after file deletion', async () => {
+      // Create named groups through client
+      const result1 = await client.createGroup('test-group', {
+        name: 'user-auth',
+      });
+      const result2 = await client.createGroup('test-group', {
+        name: 'payment',
+      });
+
+      // Verify mappings work
+      expect(client.resolveAddress('user-auth')).toBe(result1.address);
+      expect(client.resolveAddress('payment')).toBe(result2.address);
+
+      // Simulate mapping file deletion
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // Verify mappings are gone
+      expect(() => client.resolveAddress('user-auth')).toThrow();
+      expect(() => client.resolveAddress('payment')).toThrow();
+
+      // Rebuild from _meta.json
+      const rebuildResult = await client.rebuildMappings();
+
+      expect(rebuildResult).toEqual({ recovered: 2 });
+
+      // Verify mappings restored
+      expect(client.resolveAddress('user-auth')).toBe(result1.address);
+      expect(client.resolveAddress('payment')).toBe(result2.address);
+    });
+
+    it('skips unnamed groups during rebuild', async () => {
+      // Create named group
+      const named = await client.createGroup('test-group', { name: 'named' });
+
+      // Create unnamed group directly through store
+      const unnamed = await store.createGroup('test-group', {
+        client: client.getClientId(),
+      });
+
+      // Delete mappings
+      const fs = await import('node:fs');
+      fs.unlinkSync(mappingPath);
+
+      // Rebuild
+      const result = await client.rebuildMappings();
+
+      // Only named group recovered
+      expect(result).toEqual({ recovered: 1 });
+      expect(client.resolveAddress('named')).toBe(named.address);
+    });
+
+    it('handles empty store during rebuild', async () => {
+      const result = await client.rebuildMappings();
+
+      expect(result).toEqual({ recovered: 0 });
     });
   });
 });

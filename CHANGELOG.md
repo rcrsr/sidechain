@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Named group resolution with human-readable names instead of addresses; groups store metadata in `_meta.json` manifests (schema, name, client, creation timestamp)
+- Client orchestration for name-to-address resolution, duplicate detection, and recovery via `rebuildMappings()` method
+- Backend `GroupMeta` type and `readGroupMeta()` method with fallback to schema inference from slot files for backward compatibility
+- Store interface extends `createGroup()` with optional `{ client, name }` parameters while maintaining backward compatibility
+- Client provides `createGroup(schema, { name? })`, `get(nameOrAddress/path)`, `list()`, `deleteGroup(nameOrAddress)`, and `rebuildMappings()` methods
+- Named groups implementation covers 46 requirements with 1003 passing tests across 30 test files
 - Session wrapper for Store with automatic token caching and write validation
 - Session caches tokens per (path, sectionId) on reads, injects on writes
 - Explicit token parameter takes precedence over cached token

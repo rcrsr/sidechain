@@ -36,7 +36,11 @@ export type { Sidechain } from './store.js';
  *
  * Usage:
  * ```typescript
- * const client = new Client(mappingPath);
+ * const client = new Client({
+ *   clientId: 'my-client',
+ *   mappingPath: './mappings.json',
+ *   store
+ * });
  * const address = client.resolveAddress('my-group');
  * ```
  *

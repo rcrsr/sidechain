@@ -8,7 +8,7 @@
 import * as path from 'node:path';
 
 import { DEFAULT_NODE_EXTENSION } from '../shared/constants.js';
-import type { Backend, RawNode, SlotDef } from '../types/backend.js';
+import type { Backend, GroupMeta, RawNode, SlotDef } from '../types/backend.js';
 import type { SidechainConfig } from '../types/config.js';
 import type {
   ContentTypeEntry,
@@ -257,11 +257,24 @@ class StoreImpl implements Store, ControlPlane {
 
   /**
    * Create a new group with the specified schema
-   * IR-4: createGroup(id)
+   * IR-3: createGroup(schemaId, opts?)
    * AC-4: createGroup materializes all slots with defaults
    * AC-5: createGroup on existing group returns existing (idempotent)
+   * AC-17, AC-18: createGroup with opts requires client, includes in metadata
+   * EC-2: Missing client when opts provided throws InvalidSchemaError
    */
-  async createGroup(schemaId: string): Promise<GroupResult> {
+  async createGroup(
+    schemaId: string,
+    opts?: { client: string; name?: string }
+  ): Promise<GroupResult> {
+    // EC-2: Validate client when opts provided - reject undefined or empty string
+    if (opts !== undefined && (!opts.client || opts.client.trim() === '')) {
+      throw new InvalidSchemaError(
+        `Missing required field 'client' in opts for createGroup`,
+        { schemaId }
+      );
+    }
+
     // Get group schema
     const groupSchema = this.registry.getSchema(schemaId);
 
@@ -304,7 +317,16 @@ class StoreImpl implements Store, ControlPlane {
       })
     );
 
-    await this.backend.createGroup(resolvedPath, slots);
+    // IR-3: Build GroupMeta object
+    // Migration Strategy: client defaults to "unknown" for backward compatibility
+    const meta: GroupMeta = {
+      schema: schemaId,
+      name: opts?.name ?? null,
+      client: opts?.client ?? 'unknown',
+      created: new Date().toISOString(),
+    };
+
+    await this.backend.createGroup(resolvedPath, slots, meta);
 
     // Track group-to-mount mapping
     this.groupToMount.set(address, mount.id);
@@ -367,6 +389,34 @@ class StoreImpl implements Store, ControlPlane {
     this.groupToMount.delete(groupAddress);
 
     return { ok: true, value: undefined };
+  }
+
+  /**
+   * Get group metadata (_meta.json)
+   * Returns schema, name, client, and created timestamp
+   */
+  async getGroupMeta(groupAddress: string): Promise<{
+    schema: string;
+    name: string | null;
+    client: string;
+    created: string;
+  }> {
+    if (!isValidGroupAddress(groupAddress)) {
+      throw new NotFoundError(
+        groupAddress,
+        `Invalid group address: ${groupAddress}`
+      );
+    }
+
+    const resolvedPath = await this.resolveGroupPath(groupAddress);
+    const meta = await this.backend.readGroupMeta(resolvedPath);
+
+    return {
+      schema: meta.schema,
+      name: meta.name,
+      client: meta.client,
+      created: meta.created,
+    };
   }
 
   /**
