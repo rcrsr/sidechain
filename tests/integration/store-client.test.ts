@@ -103,7 +103,9 @@ describe('Store-Client Integration', () => {
   describe('End-to-End Workflow', () => {
     it('completes full workflow: create group -> write sections -> read back', async () => {
       // 1. Create group via store
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       expect(address).toMatch(/^sc_g_/);
 
       // 2. Client saves name mapping
@@ -139,8 +141,12 @@ describe('Store-Client Integration', () => {
 
     it('supports multiple groups with client name resolution', async () => {
       // Create multiple groups
-      const { address: addr1 } = await store.createGroup('test-group');
-      const { address: addr2 } = await store.createGroup('test-group');
+      const { address: addr1 } = await store.createGroup('test-group', {
+        client: 'test',
+      });
+      const { address: addr2 } = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Client maps friendly names
       client.saveMapping('user-auth', addr1);
@@ -181,8 +187,12 @@ describe('Store-Client Integration', () => {
   describe('list() Filtering', () => {
     it('returns only groups client has addresses for', async () => {
       // Create groups
-      const { address: addr1 } = await store.createGroup('test-group');
-      const { address: addr2 } = await store.createGroup('test-group');
+      const { address: addr1 } = await store.createGroup('test-group', {
+        client: 'test',
+      });
+      const { address: addr2 } = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Client only knows about addr1
       client.saveMapping('user-auth', addr1);
@@ -205,8 +215,8 @@ describe('Store-Client Integration', () => {
 
     it('returns empty array when client has no mappings', async () => {
       // Create groups but client doesn't know about them
-      await store.createGroup('test-group');
-      await store.createGroup('test-group');
+      await store.createGroup('test-group', { client: 'test' });
+      await store.createGroup('test-group', { client: 'test' });
 
       const groups = await store.list();
       expect(groups.length).toBe(2);
@@ -231,7 +241,9 @@ describe('Store-Client Integration', () => {
   // AC-9: get(path) returns node with metadata, sections, empty flag, token
   describe('get() Response Structure', () => {
     it('returns node with metadata, sections, and token', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       client.saveMapping('test-group', address);
 
       const nodePath = `${address}/requirements`;
@@ -269,7 +281,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('returns empty sections for unpopulated node', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       const node = await store.get(nodePath);
@@ -283,7 +297,9 @@ describe('Store-Client Integration', () => {
   // AC-10: writeSection with valid token succeeds
   describe('Token Flow - Valid Token', () => {
     it('writeSection with valid token succeeds', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       // Populate initial content
@@ -317,7 +333,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('section token allows section-scoped write', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -347,7 +365,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('node token allows any section write', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -377,7 +397,9 @@ describe('Store-Client Integration', () => {
   // AC-22: Stale token fails with current state and fresh token
   describe('Token Flow - Stale Token', () => {
     it('writeSection with stale token returns STALE_TOKEN error', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -414,7 +436,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('can retry with fresh token from error', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -460,7 +484,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('section token detects concurrent section changes', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -485,7 +511,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('section token allows parallel updates to different sections', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -534,7 +562,9 @@ describe('Store-Client Integration', () => {
   // AC-35: Concurrent token holders
   describe('Concurrent Token Holders', () => {
     it('first writer wins, second gets STALE_TOKEN', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -575,7 +605,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('multiple readers hold same token until first write', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -614,7 +646,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('agent can retry after losing race', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -669,7 +703,9 @@ describe('Store-Client Integration', () => {
   describe('Client-Store Flow', () => {
     it('integrates name resolution with store operations', async () => {
       // Store creates group
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Client saves mapping (simulates user command or UI)
       client.saveMapping('user-auth', address);
@@ -699,7 +735,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('supports multiple clients with same store', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Client 1 maps to "user-auth"
       const client1 = new Client({
@@ -744,7 +782,9 @@ describe('Store-Client Integration', () => {
   // Metadata operations in workflow
   describe('Metadata Operations', () => {
     it('supports metadata updates with tokens', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {
@@ -773,7 +813,9 @@ describe('Store-Client Integration', () => {
     });
 
     it('metadata write with stale token fails', async () => {
-      const { address } = await store.createGroup('test-group');
+      const { address } = await store.createGroup('test-group', {
+        client: 'test',
+      });
       const nodePath = `${address}/requirements`;
 
       await store.populate(nodePath, {

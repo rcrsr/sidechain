@@ -40,6 +40,15 @@ export interface NodeResponse {
 }
 
 /**
+ * Options for creating a group
+ * IR-1: CreateGroupOptions type with runtime validation (EC-2, EC-3)
+ */
+export interface CreateGroupOptions {
+  client: string;
+  name?: string;
+}
+
+/**
  * Result wrapper for group operations
  */
 export interface GroupResult {
@@ -102,11 +111,9 @@ export interface Store {
   /**
    * Create a new group with the specified schema
    * Returns the cryptographic address and schema ID
+   * IR-1: opts parameter with client field (runtime validation via EC-1, EC-2, EC-3)
    */
-  createGroup(
-    schemaId: string,
-    opts?: { client: string; name?: string }
-  ): Promise<GroupResult>;
+  createGroup(schemaId: string, opts: CreateGroupOptions): Promise<GroupResult>;
 
   /**
    * Delete a group and all its contents

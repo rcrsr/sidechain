@@ -63,6 +63,10 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Schema ID for the group' },
+        client: {
+          type: 'string',
+          description: 'Optional client identity (defaults to "mcp")',
+        },
       },
       required: ['id'],
     },

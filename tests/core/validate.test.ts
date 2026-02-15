@@ -431,7 +431,9 @@ describe('Describe and Validate Operations', () => {
         recursive: true,
       });
       const nvStore = await Sidechain.open(noVersionConfig);
-      const nvResult = await nvStore.createGroup('nv-group');
+      const nvResult = await nvStore.createGroup('nv-group', {
+        client: 'test',
+      });
 
       await nvStore.populate(`${nvResult.address}/doc`, {
         metadata: { 'schema-id': 'nv-node' },

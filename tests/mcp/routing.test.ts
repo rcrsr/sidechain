@@ -146,7 +146,7 @@ describe('MCP Tool Routing', () => {
   });
 
   describe('sidechain_create_group', () => {
-    test('routes to store.createGroup(id)', async () => {
+    test('routes to store.createGroup(id) with default client "mcp" [IR-5, AC-6]', async () => {
       vi.mocked(store.createGroup).mockResolvedValue({
         address: 'sc_g_abc',
         schema: 'initiative',
@@ -158,12 +158,52 @@ describe('MCP Tool Routing', () => {
         store
       );
 
-      expect(store.createGroup).toHaveBeenCalledWith('initiative');
+      expect(store.createGroup).toHaveBeenCalledWith('initiative', {
+        client: 'mcp',
+      });
       expect(result).toEqual({
         ok: true,
         address: 'sc_g_abc',
         schema: 'initiative',
       });
+    });
+
+    test('routes to store.createGroup(id) with custom client from args [IR-5, AC-6]', async () => {
+      vi.mocked(store.createGroup).mockResolvedValue({
+        address: 'sc_g_xyz',
+        schema: 'initiative',
+      });
+
+      const result = await routeToolCall(
+        'sidechain_create_group',
+        { id: 'initiative', client: 'custom-client' },
+        store
+      );
+
+      expect(store.createGroup).toHaveBeenCalledWith('initiative', {
+        client: 'custom-client',
+      });
+      expect(result).toEqual({
+        ok: true,
+        address: 'sc_g_xyz',
+        schema: 'initiative',
+      });
+    });
+
+    test('throws error when id is missing [EC-10]', async () => {
+      await expect(
+        routeToolCall('sidechain_create_group', {}, store)
+      ).rejects.toThrow('Missing required argument: id');
+    });
+
+    test('propagates store InvalidSchemaError [EC-11]', async () => {
+      const invalidSchemaError = new Error('Invalid schema: unknown-schema');
+      invalidSchemaError.name = 'InvalidSchemaError';
+      vi.mocked(store.createGroup).mockRejectedValue(invalidSchemaError);
+
+      await expect(
+        routeToolCall('sidechain_create_group', { id: 'unknown-schema' }, store)
+      ).rejects.toThrow('Invalid schema: unknown-schema');
     });
   });
 

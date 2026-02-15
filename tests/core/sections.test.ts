@@ -671,7 +671,9 @@ describe('Section Operations', () => {
     it('validates section count against schema minimum', async () => {
       // Schema requires min: 1 for phase-{n} pattern
       // Create a fresh node to test validation from scratch
-      const newGroup = await store.createGroup('test-group');
+      const newGroup = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Try to populate without any phase sections (should fail validation)
       await expect(

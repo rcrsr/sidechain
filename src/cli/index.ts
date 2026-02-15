@@ -147,9 +147,11 @@ async function routeCommand(
     }
 
     case 'create-group': {
-      // sidechain create-group <id>
+      // sidechain create-group <schema-id> [--client <id>]
       const schemaId = requireArg(args, 0, 'schema-id');
-      const result = await store.createGroup(schemaId);
+      const client =
+        typeof flags['client'] === 'string' ? flags['client'] : 'cli';
+      const result = await store.createGroup(schemaId, { client });
       return { ok: true, ...result };
     }
 

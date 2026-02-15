@@ -15,11 +15,11 @@ import {
 import { createMockStore } from '../fixtures/index.js';
 
 describe('Session Construction', () => {
-  // IR-1: constructor(store: Store)
-  // AC-1: new Session(store) creates a session with empty cache
+  // IR-2: constructor(store: Store, clientId: string)
+  // AC-1: new Session(store, clientId) creates a session with empty cache
   it('creates session with empty cache', () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     expect(session).toBeInstanceOf(Session);
     // Session should be open and operational
@@ -28,7 +28,15 @@ describe('Session Construction', () => {
 
   it('accepts any Store implementation', () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
+
+    expect(session).toBeInstanceOf(Session);
+  });
+
+  // AC-18: Session with empty clientId - constructor accepts, Store validates on call
+  it('accepts empty clientId (AC-18)', () => {
+    const mockStore = createMockStore();
+    const session = new Session(mockStore, '');
 
     expect(session).toBeInstanceOf(Session);
   });
@@ -36,8 +44,8 @@ describe('Session Construction', () => {
   // AC-7: Two Sessions wrapping same Store operate independently
   it('Two Sessions wrapping same Store operate independently (AC-7)', async () => {
     const mockStore = createMockStore();
-    const session1 = new Session(mockStore);
-    const session2 = new Session(mockStore);
+    const session1 = new Session(mockStore, 'test-client');
+    const session2 = new Session(mockStore, 'test-client');
 
     // Setup mock to return different tokens for each call
     vi.mocked(mockStore.get)
@@ -79,7 +87,7 @@ describe('Session Close', () => {
   // AC-6: close() clears all cache entries
   it('clears cache on close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     // Close the session
     session.close();
@@ -92,7 +100,7 @@ describe('Session Close', () => {
   // AC-19: Idempotent close - second call is no-op
   it('allows multiple close calls without error', () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     // First close
     session.close();
@@ -107,7 +115,7 @@ describe('Session Close', () => {
   // AC-20: Close empty session (0 cached entries) without error
   it('closes empty session without error', () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     // Close immediately without any operations (cache is empty)
     expect(() => session.close()).not.toThrow();
@@ -118,7 +126,7 @@ describe('Session Closed Error', () => {
   // EC-3: Operation on closed session throws SESSION_CLOSED
   it('throws SESSION_CLOSED on list() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -128,7 +136,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on exists() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -140,7 +148,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on get() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -152,7 +160,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on createGroup() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -166,7 +174,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on deleteGroup() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -180,7 +188,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on describeGroup() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -194,7 +202,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on validateGroup() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -208,7 +216,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on meta() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -220,7 +228,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on setMeta() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -234,7 +242,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on sections() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -248,7 +256,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on section() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -262,7 +270,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on writeSection() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -276,7 +284,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on appendSection() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -290,7 +298,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on addSection() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -304,7 +312,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on removeSection() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -318,7 +326,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on populate() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -332,7 +340,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on describe() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -344,7 +352,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on validate() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -358,7 +366,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on item.get() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -372,7 +380,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on item.add() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -386,7 +394,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on item.update() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -400,7 +408,7 @@ describe('Session Closed Error', () => {
 
   it('throws SESSION_CLOSED on item.remove() after close', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -415,7 +423,7 @@ describe('Session Closed Error', () => {
   // AC-10: Verify error code is SESSION_CLOSED
   it('SESSION_CLOSED error has correct code', async () => {
     const mockStore = createMockStore();
-    const session = new Session(mockStore);
+    const session = new Session(mockStore, 'test-client');
 
     session.close();
 
@@ -437,7 +445,7 @@ describe('Session Store Delegation', () => {
 
   beforeEach(() => {
     mockStore = createMockStore();
-    session = new Session(mockStore);
+    session = new Session(mockStore, 'test-client');
   });
 
   it('delegates list() to store', async () => {
@@ -476,7 +484,7 @@ describe('Session Store Delegation', () => {
     expect(mockStore.get).toHaveBeenCalledWith('group/slot');
   });
 
-  it('delegates createGroup() to store', async () => {
+  it('delegates createGroup() and injects clientId', async () => {
     vi.mocked(mockStore.createGroup).mockResolvedValue({
       address: 'address',
       schema: 'schema',
@@ -484,7 +492,9 @@ describe('Session Store Delegation', () => {
 
     await session.createGroup('schema-id');
 
-    expect(mockStore.createGroup).toHaveBeenCalledWith('schema-id');
+    expect(mockStore.createGroup).toHaveBeenCalledWith('schema-id', {
+      client: 'test-client',
+    });
   });
 
   it('delegates deleteGroup() to store', async () => {
@@ -724,7 +734,7 @@ describe('Read Operations with Token Caching', () => {
 
   beforeEach(() => {
     mockStore = createMockStore();
-    session = new Session(mockStore);
+    session = new Session(mockStore, 'test-client');
   });
 
   describe('get(path)', () => {
@@ -1107,7 +1117,7 @@ describe('Write Operations with Token Injection', () => {
 
   beforeEach(() => {
     mockStore = createMockStore();
-    session = new Session(mockStore);
+    session = new Session(mockStore, 'test-client');
   });
 
   describe('setMeta(path, field, value, opts?)', () => {
@@ -2109,7 +2119,7 @@ describe('Store Error Propagation', () => {
 
   beforeEach(() => {
     mockStore = createMockStore();
-    session = new Session(mockStore);
+    session = new Session(mockStore, 'test-client');
   });
 
   describe('NotFoundError propagation (EC-4, AC-11)', () => {
@@ -2518,6 +2528,245 @@ describe('Store Error Propagation', () => {
         'valid-content',
         { token: 'cached-section-token' }
       );
+    });
+  });
+});
+
+describe('Session.createGroup - clientId Injection', () => {
+  // IR-3: Session.createGroup(schemaId, opts?)
+  // AC-2: session.createGroup('schema') injects clientId and returns result
+  // AC-3: session.createGroup('schema', { name: 'grp' }) injects clientId and forwards name
+  // EC-6: Closed session throws SESSION_CLOSED
+  // EC-7: Store error propagates through Session
+  let mockStore: ReturnType<typeof createMockStore>;
+  let session: Session;
+
+  beforeEach(() => {
+    mockStore = createMockStore();
+    session = new Session(mockStore, 'test-client-123');
+  });
+
+  describe('IR-3, AC-2: createGroup without opts injects clientId', () => {
+    it('injects clientId when called without opts', async () => {
+      const mockResult = {
+        address: 'sc_g_abc123',
+        schema: 'test-schema',
+      };
+      vi.mocked(mockStore.createGroup).mockResolvedValue(mockResult);
+
+      const result = await session.createGroup('test-schema');
+
+      expect(result).toEqual(mockResult);
+      expect(mockStore.createGroup).toHaveBeenCalledWith('test-schema', {
+        client: 'test-client-123',
+      });
+    });
+
+    it('returns address and schema from store', async () => {
+      const mockResult = {
+        address: 'sc_g_xyz789',
+        schema: 'another-schema',
+      };
+      vi.mocked(mockStore.createGroup).mockResolvedValue(mockResult);
+
+      const result = await session.createGroup('another-schema');
+
+      expect(result.address).toBe('sc_g_xyz789');
+      expect(result.schema).toBe('another-schema');
+    });
+  });
+
+  describe('AC-3: createGroup with name forwards name and injects clientId', () => {
+    it('injects clientId and forwards name when provided', async () => {
+      const mockResult = {
+        address: 'sc_g_def456',
+        schema: 'test-schema',
+        name: 'my-group',
+      };
+      vi.mocked(mockStore.createGroup).mockResolvedValue(mockResult);
+
+      const result = await session.createGroup('test-schema', {
+        name: 'my-group',
+      });
+
+      expect(result).toEqual(mockResult);
+      expect(mockStore.createGroup).toHaveBeenCalledWith('test-schema', {
+        client: 'test-client-123',
+        name: 'my-group',
+      });
+    });
+
+    it('handles name with special characters', async () => {
+      const mockResult = {
+        address: 'sc_g_special',
+        schema: 'test-schema',
+        name: 'group-with-dashes_and_underscores',
+      };
+      vi.mocked(mockStore.createGroup).mockResolvedValue(mockResult);
+
+      const result = await session.createGroup('test-schema', {
+        name: 'group-with-dashes_and_underscores',
+      });
+
+      expect(result.name).toBe('group-with-dashes_and_underscores');
+      expect(mockStore.createGroup).toHaveBeenCalledWith('test-schema', {
+        client: 'test-client-123',
+        name: 'group-with-dashes_and_underscores',
+      });
+    });
+  });
+
+  describe('EC-6: Closed session throws SESSION_CLOSED', () => {
+    it('throws SESSION_CLOSED when session is closed', async () => {
+      session.close();
+
+      await expect(session.createGroup('test-schema')).rejects.toThrow(
+        SidechainError
+      );
+      await expect(session.createGroup('test-schema')).rejects.toThrow(
+        /session is closed/i
+      );
+    });
+
+    it('throws SESSION_CLOSED with correct error code', async () => {
+      session.close();
+
+      try {
+        await session.createGroup('test-schema');
+        expect.fail('Expected SESSION_CLOSED error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(SidechainError);
+        expect((error as SidechainError).code).toBe('SESSION_CLOSED');
+        expect((error as SidechainError).message).toBe('Session is closed');
+      }
+    });
+
+    it('does not call store when session is closed', async () => {
+      session.close();
+
+      try {
+        await session.createGroup('test-schema');
+      } catch {
+        // Expected to throw
+      }
+
+      expect(mockStore.createGroup).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('EC-7: Store errors propagate unchanged', () => {
+    it('propagates InvalidSchemaError from store', async () => {
+      const schemaError = new SidechainError(
+        'INVALID_SCHEMA',
+        'Schema test-schema not found'
+      );
+      vi.mocked(mockStore.createGroup).mockRejectedValue(schemaError);
+
+      try {
+        await session.createGroup('test-schema');
+        expect.fail('Expected InvalidSchemaError to be thrown');
+      } catch (error) {
+        expect(error).toBe(schemaError);
+        expect((error as SidechainError).code).toBe('INVALID_SCHEMA');
+        expect((error as SidechainError).message).toBe(
+          'Schema test-schema not found'
+        );
+      }
+    });
+
+    it('propagates ValidationError from store', async () => {
+      const validationError = new ValidationError(
+        'opts',
+        'Invalid client ID format',
+        'CreateGroupOptions'
+      );
+      vi.mocked(mockStore.createGroup).mockRejectedValue(validationError);
+
+      try {
+        await session.createGroup('test-schema');
+        expect.fail('Expected ValidationError to be thrown');
+      } catch (error) {
+        expect(error).toBe(validationError);
+        expect((error as ValidationError).code).toBe('VALIDATION_ERROR');
+        expect((error as ValidationError).message).toBe(
+          'Invalid client ID format'
+        );
+      }
+    });
+
+    it('propagates generic errors from store', async () => {
+      const genericError = new Error('Filesystem error');
+      vi.mocked(mockStore.createGroup).mockRejectedValue(genericError);
+
+      await expect(session.createGroup('test-schema')).rejects.toThrow(
+        'Filesystem error'
+      );
+    });
+  });
+
+  describe('ClientId injection with different session instances', () => {
+    it('each session injects its own clientId', async () => {
+      const session1 = new Session(mockStore, 'client-1');
+      const session2 = new Session(mockStore, 'client-2');
+
+      const mockResult1 = { address: 'sc_g_1', schema: 'schema' };
+      const mockResult2 = { address: 'sc_g_2', schema: 'schema' };
+
+      vi.mocked(mockStore.createGroup)
+        .mockResolvedValueOnce(mockResult1)
+        .mockResolvedValueOnce(mockResult2);
+
+      await session1.createGroup('schema');
+      await session2.createGroup('schema');
+
+      expect(mockStore.createGroup).toHaveBeenNthCalledWith(1, 'schema', {
+        client: 'client-1',
+      });
+      expect(mockStore.createGroup).toHaveBeenNthCalledWith(2, 'schema', {
+        client: 'client-2',
+      });
+    });
+
+    it('handles empty clientId string', async () => {
+      const emptySession = new Session(mockStore, '');
+      const mockResult = { address: 'sc_g_empty', schema: 'schema' };
+      vi.mocked(mockStore.createGroup).mockResolvedValue(mockResult);
+
+      await emptySession.createGroup('schema');
+
+      expect(mockStore.createGroup).toHaveBeenCalledWith('schema', {
+        client: '',
+      });
+    });
+
+    // AC-18: Session with empty clientId - constructor accepts, Store validates on call
+    it('empty clientId validation deferred to Store (AC-18)', async () => {
+      const emptySession = new Session(mockStore, '');
+
+      // Store rejects empty clientId
+      const validationError = new ValidationError(
+        'opts',
+        'client field must be non-empty string',
+        'CreateGroupOptions'
+      );
+      vi.mocked(mockStore.createGroup).mockRejectedValue(validationError);
+
+      // Session should propagate the Store validation error
+      try {
+        await emptySession.createGroup('schema');
+        expect.fail('Expected ValidationError to be thrown');
+      } catch (error) {
+        expect(error).toBe(validationError);
+        expect((error as ValidationError).code).toBe('VALIDATION_ERROR');
+        expect((error as ValidationError).message).toBe(
+          'client field must be non-empty string'
+        );
+      }
+
+      // Verify Store was called (validation happened at Store level)
+      expect(mockStore.createGroup).toHaveBeenCalledWith('schema', {
+        client: '',
+      });
     });
   });
 });

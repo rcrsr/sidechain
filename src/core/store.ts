@@ -28,6 +28,7 @@ import type {
   SectionSummary,
 } from '../types/section.js';
 import type {
+  CreateGroupOptions,
   GroupDescription,
   GroupEntry,
   GroupResult,
@@ -257,20 +258,20 @@ class StoreImpl implements Store, ControlPlane {
 
   /**
    * Create a new group with the specified schema
-   * IR-3: createGroup(schemaId, opts?)
+   * IR-3: createGroup(schemaId, opts)
    * AC-4: createGroup materializes all slots with defaults
    * AC-5: createGroup on existing group returns existing (idempotent)
    * AC-17, AC-18: createGroup with opts requires client, includes in metadata
-   * EC-2: Missing client when opts provided throws InvalidSchemaError
+   * EC-3: Empty client throws InvalidSchemaError
    */
   async createGroup(
     schemaId: string,
-    opts?: { client: string; name?: string }
+    opts: CreateGroupOptions
   ): Promise<GroupResult> {
-    // EC-2: Validate client when opts provided - reject undefined or empty string
-    if (opts !== undefined && (!opts.client || opts.client.trim() === '')) {
+    // EC-3: Validate client is non-empty after trimming
+    if (opts.client.trim() === '') {
       throw new InvalidSchemaError(
-        `Missing required field 'client' in opts for createGroup`,
+        'client must be non-empty in opts for createGroup',
         { schemaId }
       );
     }
@@ -318,11 +319,10 @@ class StoreImpl implements Store, ControlPlane {
     );
 
     // IR-3: Build GroupMeta object
-    // Migration Strategy: client defaults to "unknown" for backward compatibility
     const meta: GroupMeta = {
       schema: schemaId,
-      name: opts?.name ?? null,
-      client: opts?.client ?? 'unknown',
+      name: opts.name ?? null,
+      client: opts.client,
       created: new Date().toISOString(),
     };
 

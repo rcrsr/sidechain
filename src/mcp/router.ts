@@ -63,6 +63,7 @@ async function handleExists(
 
 /**
  * sidechain_create_group handler
+ * Covers: IR-5, IC-6, EC-10, EC-11, AC-6
  */
 async function handleCreateGroup(
   args: Record<string, unknown>,
@@ -71,7 +72,11 @@ async function handleCreateGroup(
   if (typeof args['id'] !== 'string') {
     throw new Error('Missing required argument: id');
   }
-  const result = await store.createGroup(args['id']);
+
+  // Extract client from args or use default 'mcp'
+  const client = typeof args['client'] === 'string' ? args['client'] : 'mcp';
+
+  const result = await store.createGroup(args['id'], { client });
   return { ok: true, ...result };
 }
 

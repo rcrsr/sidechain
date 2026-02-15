@@ -16,6 +16,7 @@ import type {
   SectionSummary,
 } from '../types/section.js';
 import type {
+  CreateGroupOptions,
   GroupDescription,
   GroupEntry,
   GroupResult,
@@ -29,12 +30,14 @@ import { SidechainError } from './errors.js';
 
 /**
  * Session class - wraps Store with token caching and lifecycle management
- * IR-1: constructor(store: Store)
+ * IR-1: constructor(store: Store, clientId: string)
+ * IR-2: Store clientId as private readonly field
  * IR-14: close()
  * IC-2: Session class implementation
  */
 export class Session implements Store {
   private readonly store: Store;
+  private readonly clientId: string;
   private readonly cache: Map<string, string>;
   private closed: boolean;
 
@@ -45,11 +48,14 @@ export class Session implements Store {
   readonly item: ItemOps;
 
   /**
-   * IR-1: constructor(store: Store)
-   * AC-1: new Session(store) creates a session with empty cache
+   * IR-2: constructor(store: Store, clientId: string)
+   * Store clientId as private readonly field
+   * No validation of clientId in constructor; Store validates on createGroup call
+   * AC-1: new Session(store, clientId) creates a session with empty cache
    */
-  constructor(store: Store) {
+  constructor(store: Store, clientId: string) {
     this.store = store;
+    this.clientId = clientId;
     this.cache = new Map<string, string>();
     this.closed = false;
 
@@ -199,9 +205,28 @@ export class Session implements Store {
     return response;
   }
 
-  async createGroup(schemaId: string): Promise<GroupResult> {
+  /**
+   * IR-3: createGroup(schemaId, opts?)
+   * Inject this.clientId as client field
+   * Forward caller's additional fields (e.g., name)
+   * AC-2: session.createGroup('schema') injects clientId and returns result
+   * AC-3: session.createGroup('schema', { name: 'grp' }) injects clientId and forwards name
+   * EC-6: Closed session throws SESSION_CLOSED
+   * EC-7: Store error propagates through Session
+   */
+  async createGroup(
+    schemaId: string,
+    opts?: Omit<CreateGroupOptions, 'client'>
+  ): Promise<GroupResult> {
     this.ensureOpen();
-    return this.store.createGroup(schemaId);
+    // Inject clientId as client field, conditionally add name if provided
+    const storeOpts: { client: string; name?: string } = {
+      client: this.clientId,
+    };
+    if (opts?.name) {
+      storeOpts.name = opts.name;
+    }
+    return this.store.createGroup(schemaId, storeOpts);
   }
 
   async deleteGroup(groupAddress: string): Promise<Result<void>> {

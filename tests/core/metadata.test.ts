@@ -338,7 +338,9 @@ describe('Metadata Operations', () => {
     // AC-16: Required metadata fields enforced on every write
     it('enforces required field presence', async () => {
       // Create a new node without the required field to test validation
-      const newGroup = await store.createGroup('test-group');
+      const newGroup = await store.createGroup('test-group', {
+        client: 'test',
+      });
 
       // Try to set optional field without setting required field first
       await expect(

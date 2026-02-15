@@ -205,7 +205,7 @@ describe('FilesystemBackend', () => {
       expect(retrieved.created).toBe('2026-02-14T10:00:00.000Z');
     });
 
-    // EC-1, AC-20: _meta.json missing - infer schema from first slot
+    // EC-1, AC-7, AC-20: _meta.json missing - infer schema from first slot, client: 'unknown'
     it('returns default metadata when _meta.json is missing', async () => {
       const groupPath = path.join(tempDir, 'test-group');
       await fs.mkdir(groupPath, { recursive: true });
@@ -325,6 +325,33 @@ schema-id: initiative-spec
       const retrieved = await backend.readGroupMeta(groupPath);
 
       expect(retrieved).toEqual(meta);
+    });
+
+    // AC-17: Existing groups with client: 'unknown' load without error
+    it('loads existing groups with client unknown without error', async () => {
+      const groupPath = path.join(tempDir, 'test-group');
+      const slots: SlotDef[] = [{ id: 'spec', schema: 'initiative-spec' }];
+      const meta: GroupMeta = {
+        schema: 'initiative-spec',
+        name: 'Legacy Group',
+        client: 'unknown',
+        created: '2026-01-01T00:00:00.000Z',
+      };
+
+      // Create group with client: 'unknown'
+      await backend.createGroup(groupPath, slots, meta);
+
+      // Verify it can be read without error
+      const retrieved = await backend.readGroupMeta(groupPath);
+
+      expect(retrieved.client).toBe('unknown');
+      expect(retrieved.schema).toBe('initiative-spec');
+      expect(retrieved.name).toBe('Legacy Group');
+
+      // Verify nodes can be read
+      const node = await backend.readNode(groupPath, 'spec');
+      expect(node).toBeDefined();
+      expect(node.metadata['schema-id']).toBe('initiative-spec');
     });
   });
 

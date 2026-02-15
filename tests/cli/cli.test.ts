@@ -105,7 +105,9 @@ async function routeCommand(
       if (arg === undefined) {
         throw new Error('Missing required argument: schema-id');
       }
-      const result = await store.createGroup(arg);
+      const client =
+        typeof flags['client'] === 'string' ? flags['client'] : 'cli';
+      const result = await store.createGroup(arg, { client });
       return { ok: true, ...result };
     }
 
@@ -590,7 +592,7 @@ describe('CLI Command Routing', () => {
   });
 
   describe('create-group', () => {
-    test('routes to store.createGroup(id)', async () => {
+    test('routes to store.createGroup(id, { client: "cli" }) by default [IR-4, AC-5]', async () => {
       vi.mocked(store.createGroup).mockResolvedValue({
         address: 'sc_g_abc',
         schema: 'initiative',
@@ -603,7 +605,9 @@ describe('CLI Command Routing', () => {
         {}
       );
 
-      expect(store.createGroup).toHaveBeenCalledWith('initiative');
+      expect(store.createGroup).toHaveBeenCalledWith('initiative', {
+        client: 'cli',
+      });
       expect(result).toEqual({
         ok: true,
         address: 'sc_g_abc',
@@ -611,10 +615,40 @@ describe('CLI Command Routing', () => {
       });
     });
 
-    test('throws error when schema-id missing', async () => {
+    test('routes to store.createGroup(id, { client }) with --client flag [AC-5]', async () => {
+      vi.mocked(store.createGroup).mockResolvedValue({
+        address: 'sc_g_def',
+        schema: 'initiative',
+      });
+
+      const result = await routeCommand(store, 'create-group', ['initiative'], {
+        client: 'custom-client',
+      });
+
+      expect(store.createGroup).toHaveBeenCalledWith('initiative', {
+        client: 'custom-client',
+      });
+      expect(result).toEqual({
+        ok: true,
+        address: 'sc_g_def',
+        schema: 'initiative',
+      });
+    });
+
+    test('throws error when schema-id missing [EC-8]', async () => {
       await expect(routeCommand(store, 'create-group', [], {})).rejects.toThrow(
         'Missing required argument: schema-id'
       );
+    });
+
+    test('propagates InvalidSchemaError from store [EC-9]', async () => {
+      const error = new Error('Invalid schema: unknown-schema');
+      error.name = 'InvalidSchemaError';
+      vi.mocked(store.createGroup).mockRejectedValue(error);
+
+      await expect(
+        routeCommand(store, 'create-group', ['unknown-schema'], {})
+      ).rejects.toThrow('Invalid schema: unknown-schema');
     });
   });
 

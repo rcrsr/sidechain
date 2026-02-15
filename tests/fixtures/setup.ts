@@ -98,7 +98,7 @@ export async function setupTestStoreWithGroup(
   groupId: string = 'test-group'
 ): Promise<TestStoreSetup & { groupAddress: string }> {
   const setup = await setupTestStore(configOrBuilder);
-  const result = await setup.store.createGroup(groupId);
+  const result = await setup.store.createGroup(groupId, { client: 'test' });
 
   return {
     ...setup,
